@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  php:
+  ci:
     name: Lint, test & SBOM
     runs-on: ubuntu-latest
     steps:
@@ -23,31 +23,32 @@ jobs:
           tools: composer
           coverage: xdebug
 
-      # Composer install runs only once dependencies exist (composer.json present).
-      - name: Install dependencies
-        run: |
-          if [ -f composer.json ]; then composer install --prefer-dist --no-progress; fi
+      - name: Validate composer.json
+        run: composer validate --no-check-publish || true
 
       - name: Lint PHP
         run: |
-          find . -path ./vendor -prune -o -name '*.php' -print0 | xargs -0 -n1 -P4 php -l
+          files=$(find . -path ./vendor -prune -o -name '*.php' -print)
+          if [ -z "$files" ]; then
+            echo "No PHP files yet , skipping lint (standalone core not migrated yet)."
+          else
+            echo "$files" | xargs -n1 php -l
+          fi
 
-      - name: Run tests (with coverage)
+      - name: Tests
         run: |
-          if [ -f vendor/bin/phpunit ]; then vendor/bin/phpunit --coverage-text; else echo "No PHPUnit yet , add tests as the standalone core lands."; fi
+          if [ -d tests ] && [ -n "$(find tests -name '*.php' 2>/dev/null)" ]; then
+            composer install --prefer-dist --no-progress
+            vendor/bin/phpunit --coverage-text
+          else
+            echo "No tests yet , add them as the standalone core lands."
+          fi
 
-      - name: Generate SBOM
+      - name: SBOM
         run: |
           if [ -f composer.lock ]; then
             composer global require cyclonedx/cyclonedx-php-composer || true
             composer CycloneDX:make-sbom --output-file=sbom.json || true
           else
-            echo "No composer.lock yet , SBOM will generate once dependencies are committed."
+            echo "No composer.lock yet , SBOM generates once dependencies are committed."
           fi
-
-      - name: Upload SBOM
-        if: hashFiles('sbom.json') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom
-          path: sbom.json
