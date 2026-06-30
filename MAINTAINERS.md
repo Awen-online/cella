@@ -6,7 +6,7 @@ Cella is built and maintained by **Awen LLC** , a digital studio , on behalf of 
 
 - **Org:** Awen LLC ([awen.online](https://awen.online))
 - **Project home:** https://github.com/Awen-online/cella
-- **Contact:** maintainers@awen.online
+- **Contact:** info@awen.online
 
 ## Maintainers & roles
 
