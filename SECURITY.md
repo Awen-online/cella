@@ -6,7 +6,7 @@ Cella handles governance workflows that can culminate in on-chain submissions, s
 
 **Please do not open a public issue for security vulnerabilities.**
 
-Report privately to **security@awen.online** (or, if you use GitHub, via the repository's **"Report a vulnerability"** / private security advisory feature under the Security tab).
+Report privately to **info@awen.online** (or, if you use GitHub, via the repository's **"Report a vulnerability"** / private security advisory feature under the Security tab).
 
 Please include:
 
