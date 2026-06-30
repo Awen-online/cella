@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    name: Lint, test & SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer
+          coverage: xdebug
+
+      # Composer install runs only once dependencies exist (composer.json present).
+      - name: Install dependencies
+        run: |
+          if [ -f composer.json ]; then composer install --prefer-dist --no-progress; fi
+
+      - name: Lint PHP
+        run: |
+          find . -path ./vendor -prune -o -name '*.php' -print0 | xargs -0 -n1 -P4 php -l
+
+      - name: Run tests (with coverage)
+        run: |
+          if [ -f vendor/bin/phpunit ]; then vendor/bin/phpunit --coverage-text; else echo "No PHPUnit yet , add tests as the standalone core lands."; fi
+
+      - name: Generate SBOM
+        run: |
+          if [ -f composer.lock ]; then
+            composer global require cyclonedx/cyclonedx-php-composer || true
+            composer CycloneDX:make-sbom --output-file=sbom.json || true
+          else
+            echo "No composer.lock yet , SBOM will generate once dependencies are committed."
+          fi
+
+      - name: Upload SBOM
+        if: hashFiles('sbom.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json

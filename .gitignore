@@ -1,0 +1,32 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# PHP / Composer
+/vendor/
+composer.phar
+
+# Node (if any tooling/build is added)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Build / output
+/dist/
+/build/
+/coverage/
+*.log
+
+# SBOM / reports (regenerated in CI)
+/sbom.json
+/sbom.xml
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
