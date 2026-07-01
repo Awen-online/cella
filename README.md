@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/brand/logo/cella-aedicula-gold-leaf.svg" alt="Cella" width="120" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/logo/cella-lockup-dark.png" />
+    <img src="assets/brand/logo/cella-lockup-light.png" alt="Cella" width="340" />
+  </picture>
 </p>
 
 # Cella
@@ -8,7 +11,7 @@
 
 Cella gives Constitutional Committee members and consortia a single workflow for their on-chain duties: ingest governance actions, assess constitutionality with LLM assistance and other checks, deliberate with members, vote internally, author the committee's final rationale, and package and submit the vote and rationale on-chain.
 
-It is the reusable core of [Cardano Curia](https://cardanocuria.com), extracted to run standalone (no WordPress required) so any committee or consortium can self-host it.
+It runs standalone (no WordPress required), so any Constitutional Committee or consortium — such as [Cardano Curia](https://cardanocuria.com) — can self-host it.
 
 ## What it does
 
@@ -25,7 +28,7 @@ Cardano Constitutional Committee members, CC consortia (such as Cardano Curia), 
 
 ## Status
 
-Cella is being extracted from the Curia plugin into standalone, self-hostable infrastructure. See [MAINTAINERS.md](MAINTAINERS.md) for the roadmap.
+Cella is being extracted from an existing WordPress plugin into standalone, self-hostable infrastructure. See [MAINTAINERS.md](MAINTAINERS.md) for the roadmap.
 
 ## Self-hosting
 
@@ -33,7 +36,7 @@ Cella is designed to run on any server. Container and quickstart instructions la
 
 ## Part of the Awen ecosystem
 
-Cella is built and maintained by [Awen](https://awen.online), the studio behind Cardano Curia and a federation of Web3, civic, and creative tools.
+Cella is built and maintained by [Awen](https://awen.online), a studio building a federation of Web3, civic, and creative tools.
 
 ## Brand & assets
 

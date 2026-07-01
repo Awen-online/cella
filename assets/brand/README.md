@@ -1,8 +1,7 @@
 # Cella — brand assets
 
-Portable brand kit for **Cella** and the wider **Cardano Curia** identity. The full
-specification — color tokens, typography, and components — lives in
-[`BRAND.md`](BRAND.md); treat this page as the quick visual index.
+Portable brand kit for **Cella**. The full specification — color tokens, typography,
+and components — lives in [`BRAND.md`](BRAND.md); treat this page as the quick visual index.
 
 The identity is deliberately **Roman / classical** — inscription-on-stone, gold leaf,
 Cardano blue — to stake out a warm, civic niche away from the cool-blue "another
@@ -46,4 +45,3 @@ Two directions, each in four finishes. (Shown below on light backgrounds; the
 
 - **`logo/`** — the 8 production SVG marks (`cella-{aedicula,chamber}-{gold-leaf,gold-solid,ink,ivory-forum}.svg`).
 - **`BRAND.md`** — full brand specification: color tokens, typography (Cinzel / EB Garamond / Inter / JetBrains Mono), and component primitives.
-- **`_source/`** — editable design-tool originals for the logo and brand sheet (open the `.dc.html` files in the design app).
