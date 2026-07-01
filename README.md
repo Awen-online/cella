@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/brand/logo/cella-aedicula-gold-leaf.svg" alt="Cella" width="120" />
+</p>
+
 # Cella
 
 > Open-source, self-hostable infrastructure for Cardano Constitutional Committee (CC) governance.
@@ -30,6 +34,10 @@ Cella is designed to run on any server. Container and quickstart instructions la
 ## Part of the Awen ecosystem
 
 Cella is built and maintained by [Awen](https://awen.online), the studio behind Cardano Curia and a federation of Web3, civic, and creative tools.
+
+## Brand & assets
+
+Brand guidelines and logo marks live in [`assets/brand/`](assets/brand/). See [`assets/brand/BRAND.md`](assets/brand/BRAND.md) for the full specification (color tokens, typography, components), and [`assets/brand/logo/`](assets/brand/logo/) for the marks — two directions (*aedicula* and *chamber*), each in gold-leaf, gold-solid, ink, and ivory-on-forum finishes.
 
 ## License
 

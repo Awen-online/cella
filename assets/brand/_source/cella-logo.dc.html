@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800;900&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <meta name="design_doc_mode" content="canvas">
+  <style>
+    body { margin: 0; }
+    *, *::before, *::after { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="min-height:100vh; background:
+      radial-gradient(120% 90% at 50% -10%, #FFFCF4 0%, #FAF7EE 38%, #F4ECD8 100%);
+      font-family:'EB Garamond', Georgia, serif; color:#1A1E3A; padding:64px 56px 96px;">
+
+  <!-- Board header -->
+  <header style="max-width:1180px; margin:0 auto 8px; text-align:center;">
+    <div style="font-family:'Cinzel',serif; font-weight:700; font-size:0.8rem; letter-spacing:0.34em; color:#C9892A; text-transform:uppercase;">Cardano Curia &nbsp;·&nbsp; Standalone Product</div>
+    <h1 style="font-family:'Cinzel',serif; font-weight:900; font-size:clamp(2.6rem,5vw,4.2rem); letter-spacing:0.06em; text-transform:uppercase; margin:14px 0 0; color:#1A1E3A;">Cella — Logo Study</h1>
+    <div style="display:flex; align-items:center; justify-content:center; gap:18px; margin:18px auto 0; max-width:640px;">
+      <span style="flex:1; height:1px; background:linear-gradient(90deg, transparent, #C9892A);"></span>
+      <span style="font-family:'EB Garamond',serif; font-style:italic; font-size:1.18rem; color:#4A4F70;">cella — the inner chamber of the temple</span>
+      <span style="flex:1; height:1px; background:linear-gradient(90deg, #C9892A, transparent);"></span>
+    </div>
+    <p style="max-width:680px; margin:22px auto 0; font-size:1.05rem; line-height:1.6; color:#4A4F70;">Four marks for the deliberation engine at the heart of Curia — each built from the brand's Cinzel capitals, gold-leaf and Cardano blue. Pick a direction, or mix the mark of one with the lockup of another.</p>
+  </header>
+
+  <!-- Turn 1 -->
+  <section style="max-width:1180px; margin:48px auto 0;">
+    <div style="display:flex; flex-wrap:wrap; gap:28px; justify-content:center; align-items:stretch;">
+
+      <!-- ========== 1a — AEDICULA ========== -->
+      <div id="1a" style="flex:1 1 360px; max-width:540px; background:#FFFCF4; border:1px solid #ECE2C5; border-radius:18px; box-shadow:0 18px 44px -28px rgba(26,30,58,0.5); overflow:hidden; display:flex; flex-direction:column;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; padding:24px 26px 0;">
+          <div>
+            <div style="font-family:'Cinzel',serif; font-weight:700; font-size:0.72rem; letter-spacing:0.3em; color:#C9892A; text-transform:uppercase;">Direction</div>
+            <div style="font-family:'Cinzel',serif; font-weight:900; font-size:1.5rem; letter-spacing:0.04em; text-transform:uppercase; margin-top:6px;">Aedicula</div>
+            <div style="font-family:'EB Garamond',serif; font-style:italic; font-size:1.02rem; color:#7A7F99; margin-top:2px;">the temple doorway</div>
+          </div>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:0.72rem; font-weight:500; color:#7A5418; background:#F4ECD8; border:1px solid #ECE2C5; border-radius:999px; padding:5px 11px;">1a</span>
+        </div>
+
+        <!-- hero -->
+        <div style="margin:22px 26px 0; padding:40px; border-radius:12px; background:
+            radial-gradient(80% 70% at 50% 30%, #FFFFFF 0%, #FAF7EE 70%, #F4ECD8 100%);
+            border:1px solid #ECE2C5; display:flex; justify-content:center;">
+          <svg viewBox="0 0 100 100" width="150" height="150" aria-label="Cella aedicula mark">
+            <defs>
+              <linearGradient id="gldA" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#E6B660"/><stop offset="0.5" stop-color="#C9892A"/><stop offset="1" stop-color="#8E5C18"/>
+              </linearGradient>
+            </defs>
+            <path d="M22 86 L22 42 A28 28 0 0 1 78 42 L78 86" fill="none" stroke="url(#gldA)" stroke-width="9" stroke-linejoin="miter"/>
+            <rect x="11" y="84" width="78" height="9" rx="1.5" fill="url(#gldA)"/>
+            <circle cx="50" cy="62" r="6.5" fill="#0033AD"/>
+          </svg>
+        </div>
+
+        <!-- light lockup -->
+        <div style="margin:18px 26px 0; padding:18px 22px; display:flex; align-items:center; gap:16px; border:1px solid #ECE2C5; border-radius:10px; background:#FAF7EE;">
+          <svg viewBox="0 0 100 100" width="42" height="42" style="color:#C9892A; flex:none;">
+            <path d="M22 86 L22 42 A28 28 0 0 1 78 42 L78 86" fill="none" stroke="currentColor" stroke-width="9"/>
+            <rect x="11" y="84" width="78" height="9" rx="1.5" fill="currentColor"/>
+            <circle cx="50" cy="62" r="6.5" fill="#0033AD"/>
+          </svg>
+          <div>
+            <div style="font-family:'Cinzel',serif; font-weight:900; font-size:1.7rem; letter-spacing:0.18em; line-height:1; color:#1A1E3A;">CELLA</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:0.62rem; letter-spacing:0.22em; color:#7A7F99; margin-top:6px;">CARDANO · CC INFRASTRUCTURE</div>
+          </div>
+        </div>
+
+        <!-- dark lockup -->
+        <div style="margin:14px 26px 0; padding:18px 22px; display:flex; align-items:center; gap:16px; border-radius:10px; background:#0A0E27;">
+          <svg viewBox="0 0 100 100" width="42" height="42" style="color:#FAF7EE; flex:none;">
+            <path d="M22 86 L22 42 A28 28 0 0 1 78 42 L78 86" fill="none" stroke="currentColor" stroke-width="9"/>
+            <rect x="11" y="84" width="78" height="9" rx="1.5" fill="currentColor"/>
+            <circle cx="50" cy="62" r="6.5" fill="#F5D27A"/>
+          </svg>
+          <div>
+            <div style="font-family:'Cinzel',serif; font-weight:900; font-size:1.7rem; letter-spacing:0.18em; line-height:1; color:#FAF7EE;">CELLA</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:0.62rem; letter-spacing:0.22em; color:#8A90B0; margin-top:6px;">CARDANO · CC INFRASTRUCTURE</div>
+          </div>
+        </div>
+
+        <!-- scale row -->
+        <div style="margin:16px 26px 0; display:flex; align-items:center; gap:14px;">
+          <span style="font-family:'JetBrains Mono',monospace; font-size:0.6rem; letter-spacing:0.16em; color:#7A7F99;">SCALES</span>
+          <span style="flex:1; height:1px; background:#ECE2C5;"></span>
+          <svg viewBox="0 0 100 100" width="22" height="22" style="color:#1A1E3A;"><path d="M22 86 L22 42 A28 28 0 0 1 78 42 L78 86" fill="none" stroke="currentColor" stroke-width="10"/><rect x="11" y="84" width="78" height="10" fill="currentColor"/></svg>
+          <svg viewBox="0 0 100 100" width="26" height="26" style="color:#C9892A;"><path d="M22 86 L22 42 A28 28 0 0 1 78 42 L78 86" fill="none" stroke="currentColor" stroke-width="9"/><rect x="11" y="84" width="78" height="9" fill="currentColor"/><circle cx="50" cy="62" r="6.5" fill="#0033AD"/></svg>
+          <div style="width:38px; height:38px; border-radius:9px; background:#0A0E27; display:flex; align-items:center; justify-content:center;">
+            <svg viewBox="0 0 100 100" width="24" height="24" style="color:#FAF7EE;"><path d="M22 86 L22 42 A28 28 0 0 1 78 42 L78 86" fill="none" stroke="currentColor" stroke-width="9"/><rect x="11" y="84" width="78" height="9" fill="currentColor"/><circle cx="50" cy="62" r="6.5" fill="#F5D27A"/></svg>
+          </div>
+        </div>
+
+        <p style="margin:18px 26px 24px; font-size:1rem; line-height:1.5; color:#4A4F70; flex:1;">An arch on two posts — the threshold of the chamber. The Cardano seal rests inside, the matter held within the committee's room.</p>
+      </div>
+
+      <!-- ========== 1b — INNER CHAMBER (C + room) ========== -->
+      <div id="1b" style="flex:1 1 360px; max-width:540px; background:#FFFCF4; border:1px solid #ECE2C5; border-radius:18px; box-shadow:0 18px 44px -28px rgba(26,30,58,0.5); overflow:hidden; display:flex; flex-direction:column;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; padding:24px 26px 0;">
+          <div>
+            <div style="font-family:'Cinzel',serif; font-weight:700; font-size:0.72rem; letter-spacing:0.3em; color:#C9892A; text-transform:uppercase;">Direction</div>
+            <div style="font-family:'Cinzel',serif; font-weight:900; font-size:1.5rem; letter-spacing:0.04em; text-transform:uppercase; margin-top:6px;">Inner Chamber</div>
+            <div style="font-family:'EB Garamond',serif; font-style:italic; font-size:1.02rem; color:#7A7F99; margin-top:2px;">the room within the C</div>
+          </div>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:0.72rem; font-weight:500; color:#7A5418; background:#F4ECD8; border:1px solid #ECE2C5; border-radius:999px; padding:5px 11px;">1b</span>
+        </div>
+
+        <div style="margin:22px 26px 0; padding:40px; border-radius:12px; background:
+            radial-gradient(80% 70% at 50% 30%, #FFFFFF 0%, #FAF7EE 70%, #F4ECD8 100%);
+            border:1px solid #ECE2C5; display:flex; justify-content:center;">
+          <svg viewBox="0 0 100 100" width="150" height="150" aria-label="Cella inner-chamber mark">
+            <defs>
+              <linearGradient id="gldB" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#E6B660"/><stop offset="0.5" stop-color="#C9892A"/><stop offset="1" stop-color="#8E5C18"/>
+              </linearGradient>
+            </defs>
+            <path d="M70 24 A34 34 0 1 0 70 76" fill="none" stroke="url(#gldB)" stroke-width="11" stroke-linecap="butt"/>
+            <rect x="40" y="40" width="20" height="20" fill="#0033AD"/>
+          </svg>
+        </div>
+
+        <div style="margin:18px 26px 0; padding:18px 22px; display:flex; align-items:center; gap:16px; border:1px solid #ECE2C5; border-radius:10px; background:#FAF7EE;">
+          <svg viewBox="0 0 100 100" width="42" height="42" style="color:#C9892A; flex:none;">
+            <path d="M70 24 A34 34 0 1 0 70 76" fill="none" stroke="currentColor" stroke-width="11"/>
+            <rect x="40" y="40" width="20" height="20" fill="#0033AD"/>
+          </svg>
+          <div>
+            <div style="font-family:'Cinzel',serif; font-weight:900; font-size:1.7rem; letter-spacing:0.18em; line-height:1; color:#1A1E3A;">CELLA</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:0.62rem; letter-spacing:0.22em; color:#7A7F99; margin-top:6px;">CARDANO · CC INFRASTRUCTURE</div>
+          </div>
+        </div>
+
+        <div style="margin:14px 26px 0; padding:18px 22px; display:flex; align-items:center; gap:16px; border-radius:10px; background:#0A0E27;">
+          <svg viewBox="0 0 100 100" width="42" height="42" style="color:#FAF7EE; flex:none;">
+            <path d="M70 24 A34 34 0 1 0 70 76" fill="none" stroke="currentColor" stroke-width="11"/>
+            <rect x="40" y="40" width="20" height="20" fill="#1E5BFF"/>
+          </svg>
+          <div>
+            <div style="font-family:'Cinzel',serif; font-weight:900; font-size:1.7rem; letter-spacing:0.18em; line-height:1; color:#FAF7EE;">CELLA</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:0.62rem; letter-spacing:0.22em; color:#8A90B0; margin-top:6px;">CARDANO · CC INFRASTRUCTURE</div>
+          </div>
+        </div>
+
+        <div style="margin:16px 26px 0; display:flex; align-items:center; gap:14px;">
+          <span style="font-family:'JetBrains Mono',monospace; font-size:0.6rem; letter-spacing:0.16em; color:#7A7F99;">SCALES</span>
+          <span style="flex:1; height:1px; background:#ECE2C5;"></span>
+          <svg viewBox="0 0 100 100" width="22" height="22" style="color:#1A1E3A;"><path d="M70 24 A34 34 0 1 0 70 76" fill="none" stroke="currentColor" stroke-width="12"/><rect x="41" y="41" width="18" height="18" fill="#1A1E3A"/></svg>
+          <svg viewBox="0 0 100 100" width="26" height="26" style="color:#C9892A;"><path d="M70 24 A34 34 0 1 0 70 76" fill="none" stroke="currentColor" stroke-width="11"/><rect x="40" y="40" width="20" height="20" fill="#0033AD"/></svg>
+          <div style="width:38px; height:38px; border-radius:9px; background:#0A0E27; display:flex; align-items:center; justify-content:center;">
+            <svg viewBox="0 0 100 100" width="24" height="24" style="color:#FAF7EE;"><path d="M70 24 A34 34 0 1 0 70 76" fill="none" stroke="currentColor" stroke-width="11"/><rect x="40" y="40" width="20" height="20" fill="#1E5BFF"/></svg>
+          </div>
+        </div>
+
+        <p style="margin:18px 26px 24px; font-size:1rem; line-height:1.5; color:#4A4F70; flex:1;">A Cinzel C cradling a squared room — the cella itself. Gold enclosing Cardano blue: the committee's chamber holding the on-chain matter.</p>
+      </div>
+
+      <!-- ========== 1c — TEMPLE FRONT ========== -->
+      <div id="1c" style="flex:1 1 360px; max-width:540px; background:#FFFCF4; border:1px solid #ECE2C5; border-radius:18px; box-shadow:0 18px 44px -28px rgba(26,30,58,0.5); overflow:hidden; display:flex; flex-direction:column;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; padding:24px 26px 0;">
+          <div>
+            <div style="font-family:'Cinzel',serif; font-weight:700; font-size:0.72rem; letter-spacing:0.3em; color:#C9892A; text-transform:uppercase;">Direction</div>
+            <div style="font-family:'Cinzel',serif; font-weight:900; font-size:1.5rem; letter-spacing:0.04em; text-transform:uppercase; margin-top:6px;">Temple Front</div>
+            <div style="font-family:'EB Garamond',serif; font-style:italic; font-size:1.02rem; color:#7A7F99; margin-top:2px;">pediment &amp; colonnade</div>
+          </div>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:0.72rem; font-weight:500; color:#7A5418; background:#F4ECD8; border:1px solid #ECE2C5; border-radius:999px; padding:5px 11px;">1c</span>
+        </div>
+
+        <div style="margin:22px 26px 0; padding:40px; border-radius:12px; background:
+            radial-gradient(80% 70% at 50% 30%, #FFFFFF 0%, #FAF7EE 70%, #F4ECD8 100%);
+            border:1px solid #ECE2C5; display:flex; justify-content:center;">
+          <svg viewBox="0 0 100 100" width="150" height="150" aria-label="Cella temple-front mark">
+            <defs>
+              <linearGradient id="gldC" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#E6B660"/><stop offset="0.5" stop-color="#C9892A"/><stop offset="1" stop-color="#8E5C18"/>
+              </linearGradient>
+            </defs>
+            <g fill="url(#gldC)">
+              <path d="M16 46 L50 22 L84 46 Z"/>
+              <rect x="14" y="49" width="72" height="7" rx="1"/>
+              <rect x="22" y="59" width="7" height="25"/>
+              <rect x="37" y="59" width="7" height="25"/>
+              <rect x="56" y="59" width="7" height="25"/>
+              <rect x="71" y="59" width="7" height="25"/>
+              <rect x="12" y="86" width="76" height="8" rx="1"/>
+            </g>
+            <circle cx="50" cy="37" r="4.4" fill="#0033AD"/>
+          </svg>
+        </div>
+
+        <div style="margin:18px 26px 0; padding:18px 22px; display:flex; align-items:center; gap:16px; border:1px solid #ECE2C5; border-radius:10px; background:#FAF7EE;">
+          <svg viewBox="0 0 100 100" width="42" height="42" style="color:#C9892A; flex:none;">
+            <g fill="currentColor"><path d="M16 46 L50 22 L84 46 Z"/><rect x="14" y="49" width="72" height="7"/><rect x="22" y="59" width="7" height="25"/><rect x="37" y="59" width="7" height="25"/><rect x="56" y="59" width="7" height="25"/><rect x="71" y="59" width="7" height="25"/><rect x="12" y="86" width="76" height="8"/></g>
+          </svg>
+          <div>
+            <div style="font-family:'Cinzel',serif; font-weight:900; font-size:1.7rem; letter-spacing:0.18em; line-height:1; color:#1A1E3A;">CELLA</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:0.62rem; letter-spacing:0.22em; color:#7A7F99; margin-top:6px;">CARDANO · CC INFRASTRUCTURE</div>
+          </div>
+        </div>
+
+        <div style="margin:14px 26px 0; padding:18px 22px; display:flex; align-items:center; gap:16px; border-radius:10px; background:#0A0E27;">
+          <svg viewBox="0 0 100 100" width="42" height="42" style="color:#FAF7EE; flex:none;">
+            <g fill="currentColor"><path d="M16 46 L50 22 L84 46 Z"/><rect x="14" y="49" width="72" height="7"/><rect x="22" y="59" width="7" height="25"/><rect x="37" y="59" width="7" height="25"/><rect x="56" y="59" width="7" height="25"/><rect x="71" y="59" width="7" height="25"/><rect x="12" y="86" width="76" height="8"/></g>
+          </svg>
+          <div>
+            <div style="font-family:'Cinzel',serif; font-weight:900; font-size:1.7rem; letter-spacing:0.18em; line-height:1; color:#FAF7EE;">CELLA</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:0.62rem; letter-spacing:0.22em; color:#8A90B0; margin-top:6px;">CARDANO · CC INFRASTRUCTURE</div>
+          </div>
+        </div>
+
+        <div style="margin:16px 26px 0; display:flex; align-items:center; gap:14px;">
+          <span style="font-family:'JetBrains Mono',monospace; font-size:0.6rem; letter-spacing:0.16em; color:#7A7F99;">SCALES</span>
+          <span style="flex:1; height:1px; background:#ECE2C5;"></span>
+          <svg viewBox="0 0 100 100" width="22" height="22" style="color:#1A1E3A;"><g fill="currentColor"><path d="M16 46 L50 22 L84 46 Z"/><rect x="14" y="49" width="72" height="7"/><rect x="22" y="59" width="7" height="25"/><rect x="37" y="59" width="7" height="25"/><rect x="56" y="59" width="7" height="25"/><rect x="71" y="59" width="7" height="25"/><rect x="12" y="86" width="76" height="8"/></g></svg>
+          <svg viewBox="0 0 100 100" width="26" height="26" style="color:#C9892A;"><g fill="currentColor"><path d="M16 46 L50 22 L84 46 Z"/><rect x="14" y="49" width="72" height="7"/><rect x="22" y="59" width="7" height="25"/><rect x="37" y="59" width="7" height="25"/><rect x="56" y="59" width="7" height="25"/><rect x="71" y="59" width="7" height="25"/><rect x="12" y="86" width="76" height="8"/></g></svg>
+          <div style="width:38px; height:38px; border-radius:9px; background:#0A0E27; display:flex; align-items:center; justify-content:center;">
+            <svg viewBox="0 0 100 100" width="24" height="24" style="color:#FAF7EE;"><g fill="currentColor"><path d="M16 46 L50 22 L84 46 Z"/><rect x="14" y="49" width="72" height="7"/><rect x="22" y="59" width="7" height="25"/><rect x="37" y="59" width="7" height="25"/><rect x="56" y="59" width="7" height="25"/><rect x="71" y="59" width="7" height="25"/><rect x="12" y="86" width="76" height="8"/></g></svg>
+          </div>
+        </div>
+
+        <p style="margin:18px 26px 24px; font-size:1rem; line-height:1.5; color:#4A4F70; flex:1;">The most literal reading: a four-column temple front with the seal in the gable. Authoritative and instantly civic — closest in spirit to Curia's wreath.</p>
+      </div>
+
+      <!-- ========== 1d — INCISED CAPITAL ========== -->
+      <div id="1d" style="flex:1 1 360px; max-width:540px; background:#FFFCF4; border:1px solid #ECE2C5; border-radius:18px; box-shadow:0 18px 44px -28px rgba(26,30,58,0.5); overflow:hidden; display:flex; flex-direction:column;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; padding:24px 26px 0;">
+          <div>
+            <div style="font-family:'Cinzel',serif; font-weight:700; font-size:0.72rem; letter-spacing:0.3em; color:#C9892A; text-transform:uppercase;">Direction</div>
+            <div style="font-family:'Cinzel',serif; font-weight:900; font-size:1.5rem; letter-spacing:0.04em; text-transform:uppercase; margin-top:6px;">Incised Capital</div>
+            <div style="font-family:'EB Garamond',serif; font-style:italic; font-size:1.02rem; color:#7A7F99; margin-top:2px;">the carved letter</div>
+          </div>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:0.72rem; font-weight:500; color:#7A5418; background:#F4ECD8; border:1px solid #ECE2C5; border-radius:999px; padding:5px 11px;">1d</span>
+        </div>
+
+        <div style="margin:22px 26px 0; padding:30px 40px; border-radius:12px; background:
+            radial-gradient(80% 70% at 50% 30%, #FFFFFF 0%, #FAF7EE 70%, #F4ECD8 100%);
+            border:1px solid #ECE2C5; display:flex; justify-content:center; position:relative;">
+          <div style="position:relative; line-height:1;">
+            <span style="font-family:'Cinzel',serif; font-weight:900; font-size:150px; letter-spacing:0; background:linear-gradient(180deg,#E6B660 0%,#C9892A 52%,#8E5C18 100%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; color:transparent; display:inline-block;">C</span>
+            <span style="position:absolute; top:50%; left:60%; transform:translate(-50%,-50%); width:16px; height:16px; background:#0033AD; border-radius:2px;"></span>
+          </div>
+        </div>
+
+        <div style="margin:18px 26px 0; padding:18px 22px; display:flex; align-items:center; gap:16px; border:1px solid #ECE2C5; border-radius:10px; background:#FAF7EE;">
+          <div style="position:relative; line-height:0.8; flex:none;">
+            <span style="font-family:'Cinzel',serif; font-weight:900; font-size:46px; color:#C9892A;">C</span>
+            <span style="position:absolute; top:50%; left:58%; transform:translate(-50%,-50%); width:6px; height:6px; background:#0033AD; border-radius:1px;"></span>
+          </div>
+          <div>
+            <div style="font-family:'Cinzel',serif; font-weight:900; font-size:1.7rem; letter-spacing:0.18em; line-height:1; color:#1A1E3A;">CELLA</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:0.62rem; letter-spacing:0.22em; color:#7A7F99; margin-top:6px;">CARDANO · CC INFRASTRUCTURE</div>
+          </div>
+        </div>
+
+        <div style="margin:14px 26px 0; padding:18px 22px; display:flex; align-items:center; gap:16px; border-radius:10px; background:#0A0E27;">
+          <div style="position:relative; line-height:0.8; flex:none;">
+            <span style="font-family:'Cinzel',serif; font-weight:900; font-size:46px; color:#FAF7EE;">C</span>
+            <span style="position:absolute; top:50%; left:58%; transform:translate(-50%,-50%); width:6px; height:6px; background:#F5D27A; border-radius:1px;"></span>
+          </div>
+          <div>
+            <div style="font-family:'Cinzel',serif; font-weight:900; font-size:1.7rem; letter-spacing:0.18em; line-height:1; color:#FAF7EE;">CELLA</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:0.62rem; letter-spacing:0.22em; color:#8A90B0; margin-top:6px;">CARDANO · CC INFRASTRUCTURE</div>
+          </div>
+        </div>
+
+        <div style="margin:16px 26px 0; display:flex; align-items:center; gap:14px;">
+          <span style="font-family:'JetBrains Mono',monospace; font-size:0.6rem; letter-spacing:0.16em; color:#7A7F99;">SCALES</span>
+          <span style="flex:1; height:1px; background:#ECE2C5;"></span>
+          <span style="font-family:'Cinzel',serif; font-weight:900; font-size:24px; color:#1A1E3A;">C</span>
+          <span style="font-family:'Cinzel',serif; font-weight:900; font-size:28px; color:#C9892A;">C</span>
+          <div style="width:38px; height:38px; border-radius:9px; background:#0A0E27; display:flex; align-items:center; justify-content:center;">
+            <span style="font-family:'Cinzel',serif; font-weight:900; font-size:24px; color:#FAF7EE;">C</span>
+          </div>
+        </div>
+
+        <p style="margin:18px 26px 24px; font-size:1rem; line-height:1.5; color:#4A4F70; flex:1;">Pure typography — a single incised Cinzel capital with the Cardano seal set in its mouth. The most flexible and modern; reads cleanly at favicon size.</p>
+      </div>
+
+    </div>
+
+    <!-- footnote -->
+    <div style="max-width:1180px; margin:40px auto 0; text-align:center; font-family:'EB Garamond',serif; font-style:italic; color:#7A7F99; font-size:1rem;">
+      All four use the brand palette — gold-leaf <span style="color:#C9892A; font-style:normal; font-weight:600;">#C9892A</span>, Cardano blue <span style="color:#0033AD; font-style:normal; font-weight:600;">#0033AD</span> — and Cinzel capitals, ready to sit beside the Curia wreath.
+    </div>
+  </section>
+
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Cella inner-chamber mark — gold leaf">
+  <defs>
+    <linearGradient id="goldleaf" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E6B660"></stop>
+      <stop offset="0.5" stop-color="#C9892A"></stop>
+      <stop offset="1" stop-color="#8E5C18"></stop>
+    </linearGradient>
+  </defs>
+  <path d="M70 24 A34 34 0 1 0 70 76" fill="none" stroke="url(#goldleaf)" stroke-width="11"></path>
+  <rect x="40" y="40" width="20" height="20" fill="#0033AD"></rect>
+</svg>
