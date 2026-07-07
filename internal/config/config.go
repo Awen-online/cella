@@ -10,6 +10,12 @@ type Config struct {
 	Addr       string // web server listen address
 	KoiosURL   string // Koios API base URL
 	KoiosToken string // optional Koios bearer token
+
+	// Constitutionality review — bring your own model. Any OpenAI-compatible
+	// endpoint (OpenAI, OpenRouter, Groq, vLLM, LM Studio, local Ollama).
+	LLMURL   string // e.g. https://api.openai.com/v1 or http://localhost:11434/v1
+	LLMModel string // e.g. gpt-4o-mini or llama3.1
+	LLMKey   string // optional (local models need none)
 }
 
 // Load reads configuration from the environment, applying defaults.
@@ -19,6 +25,9 @@ func Load() Config {
 		Addr:       env("CELLA_ADDR", ":8080"),
 		KoiosURL:   env("KOIOS_URL", "https://api.koios.rest/api/v1"),
 		KoiosToken: os.Getenv("KOIOS_TOKEN"),
+		LLMURL:     os.Getenv("CELLA_LLM_URL"),
+		LLMModel:   os.Getenv("CELLA_LLM_MODEL"),
+		LLMKey:     os.Getenv("CELLA_LLM_KEY"),
 	}
 }
 

@@ -62,6 +62,23 @@ func (a GovernanceAction) Title() string {
 	return ""
 }
 
+// Abstract extracts the CIP-108 abstract from the anchored metadata, when
+// present.
+func (a GovernanceAction) Abstract() string {
+	if len(a.MetaJSON) == 0 {
+		return ""
+	}
+	var m struct {
+		Body struct {
+			Abstract string `json:"abstract"`
+		} `json:"body"`
+	}
+	if err := json.Unmarshal(a.MetaJSON, &m); err == nil {
+		return m.Body.Abstract
+	}
+	return ""
+}
+
 // GovernanceActions fetches recent governance actions, newest first.
 func (c *Client) GovernanceActions(ctx context.Context, limit int) ([]GovernanceAction, error) {
 	if limit <= 0 {

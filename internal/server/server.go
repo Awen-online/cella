@@ -42,11 +42,14 @@ func (s *Server) ListenAndServe(addr string) error {
 	return srv.ListenAndServe()
 }
 
-// actionView is a governance action plus its Constitutional Committee votes.
+// actionView is a governance action plus its Constitutional Committee votes and
+// its (AI-assisted) constitutionality review.
 type actionView struct {
 	store.ActionRow
 	Votes            []store.VoteRow
 	Yes, No, Abstain int
+	Review           store.ReviewRow
+	HasReview        bool
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +73,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	reviews, err := s.db.ReviewsFor(ids)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	views := make([]actionView, 0, len(actions))
 	for _, a := range actions {
@@ -83,6 +91,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			case "Abstain":
 				av.Abstain++
 			}
+		}
+		if rv, ok := reviews[a.ProposalID]; ok {
+			av.Review, av.HasReview = rv, true
 		}
 		views = append(views, av)
 	}
@@ -138,6 +149,13 @@ const indexHTML = `<!doctype html>
   .votes .v { font-size:12.5px; margin:2px 0; }
   .votes .v b.y { color:var(--green); } .votes .v b.n { color:var(--red); } .votes .v b.a { color:var(--muted); }
   .votes .cc { font-family:ui-monospace,Consolas,monospace; color:var(--muted); font-size:11px; }
+  .review { margin-top:8px; }
+  .pill { display:inline-block; font-family:'Cinzel',serif; font-size:10px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; padding:2px 8px; border-radius:999px; border:1px solid; }
+  .pill.constitutional { color:var(--green); border-color:rgba(75,189,136,.5); }
+  .pill.unconstitutional { color:var(--red); border-color:rgba(217,105,95,.5); }
+  .pill.uncertain { color:var(--goldb); border-color:rgba(245,210,122,.5); }
+  .rsum { font-size:13px; color:var(--body); margin-top:4px; max-width:520px; }
+  .legend { color:var(--muted); font-size:13px; margin-top:6px; font-style:italic; }
   .empty { margin-top:20px; padding:22px; border:1px dashed rgba(201,137,42,.35); border-radius:12px; color:var(--muted); }
   .empty code { color:var(--goldb); }
   footer { padding:20px 6vw; color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
@@ -150,6 +168,7 @@ const indexHTML = `<!doctype html>
 </header>
 <main>
   <h2>Governance actions &amp; Constitutional Committee votes</h2>
+  <div class="legend">Constitutionality tags are AI-assisted assessments — the committee decides and signs. Run <code>cella review</code> to generate them with your own model.</div>
   {{if .}}
   <table>
     <thead><tr><th>Date</th><th>Type</th><th>Action</th><th>CC votes &amp; rationales</th></tr></thead>
@@ -161,6 +180,12 @@ const indexHTML = `<!doctype html>
         <td class="title">
           {{if .Title}}{{.Title}}{{else}}<span style="color:var(--muted)">(no anchored title)</span>{{end}}
           <div class="id">{{short .ProposalID}}</div>
+          {{if .HasReview}}
+          <div class="review">
+            <span class="pill {{.Review.Verdict}}">AI · {{.Review.Verdict}}</span>
+            <div class="rsum">{{.Review.Summary}}</div>
+          </div>
+          {{end}}
         </td>
         <td>
           {{if .Votes}}
