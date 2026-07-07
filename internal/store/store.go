@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Awen-online/cella/internal/koios"
@@ -129,6 +130,82 @@ LIMIT ?`, limit)
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// UpsertVotes stores the Constitutional Committee votes among those cast on
+// proposalID, returning the number written. Non-CC votes (DReps, SPOs) are
+// ignored — Cella is a committee tool.
+func (d *DB) UpsertVotes(proposalID string, votes []koios.Vote) (int, error) {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+INSERT INTO cc_votes (proposal_id, cc_hot_id, vote, rationale_url, block_time)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(proposal_id, cc_hot_id) DO UPDATE SET
+  vote=excluded.vote, rationale_url=excluded.rationale_url, block_time=excluded.block_time`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	n := 0
+	for _, v := range votes {
+		if v.VoterRole != "ConstitutionalCommittee" {
+			continue
+		}
+		if _, err := stmt.Exec(proposalID, v.VoterID, v.Vote, v.MetaURL, v.BlockTime); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, tx.Commit()
+}
+
+// VoteRow is a stored CC vote.
+type VoteRow struct {
+	ProposalID   string
+	VoterID      string
+	Vote         string
+	RationaleURL string
+	BlockTime    int64
+}
+
+// VotesFor returns CC votes for the given proposal IDs, grouped by proposal_id.
+func (d *DB) VotesFor(ids []string) (map[string][]VoteRow, error) {
+	out := map[string][]VoteRow{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+
+	rows, err := d.sql.Query(`
+SELECT proposal_id, cc_hot_id, vote, rationale_url, block_time
+FROM cc_votes
+WHERE proposal_id IN (`+placeholders+`)
+ORDER BY cc_hot_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var r VoteRow
+		var rationale sql.NullString
+		if err := rows.Scan(&r.ProposalID, &r.VoterID, &r.Vote, &rationale, &r.BlockTime); err != nil {
+			return nil, err
+		}
+		r.RationaleURL = rationale.String
+		out[r.ProposalID] = append(out[r.ProposalID], r)
 	}
 	return out, rows.Err()
 }
