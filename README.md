@@ -28,11 +28,25 @@ Cardano Constitutional Committee members, CC consortia (such as Cardano Curia), 
 
 ## Status
 
-Cella is being extracted from an existing WordPress plugin into standalone, self-hostable infrastructure. See [MAINTAINERS.md](MAINTAINERS.md) for the roadmap.
+Cella is being rebuilt from an existing WordPress deployment (live at [cardanocuria.com](https://cardanocuria.com)) into a **standalone, single-binary tool** — no WordPress, no database server, no runtime dependencies. The first slice (governance-action ingest + web view) is in this repo. See [MAINTAINERS.md](MAINTAINERS.md) for the roadmap.
 
-## Self-hosting
+## Quickstart
 
-Cella is designed to run on any server. Container and quickstart instructions land with the standalone migration (see the roadmap). Configuration is via environment variables; see `.env.example`.
+Cella is a single Go binary. Build it once, then run — it creates its own local SQLite database.
+
+```bash
+git clone https://github.com/Awen-online/cella
+cd cella
+go mod tidy         # fetch dependencies (first build only)
+go build -o cella .
+
+./cella ingest      # pull governance actions from Koios into ./cella.db
+./cella serve       # then open http://localhost:8080
+```
+
+That's the whole install. Configuration is optional and by environment (see [`.env.example`](.env.example)): `CELLA_DB`, `CELLA_ADDR`, `KOIOS_URL`, `KOIOS_TOKEN`. Point `KOIOS_URL` at a Preprod/Preview instance to work against testnets.
+
+No API key is required — Koios is a public, decentralized Cardano query layer.
 
 ## Part of the Awen ecosystem
 

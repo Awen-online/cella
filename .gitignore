@@ -5,9 +5,12 @@
 *.key
 *.pem
 
-# PHP / Composer
-/vendor/
-composer.phar
+# Go build output + local database
+/cella
+/cella.exe
+*.db
+*.db-journal
+*.db-wal
 
 # Node (if any tooling/build is added)
 node_modules/
@@ -23,6 +26,9 @@ yarn-error.log*
 # SBOM / reports (regenerated in CI)
 /sbom.json
 /sbom.xml
+
+# Local-only reference material (contributor runbooks, live vote data — never publish)
+/reference/
 
 # OS / editor
 .DS_Store
