@@ -1,5 +1,6 @@
-// Package server serves Cella's minimal web UI: a list of ingested governance
-// actions. It is intentionally dependency-free (net/http + html/template).
+// Package server serves Cella's minimal web UI: governance actions and the
+// Constitutional Committee's votes and rationales. It is intentionally
+// dependency-free (net/http + html/template).
 package server
 
 import (
@@ -41,18 +42,53 @@ func (s *Server) ListenAndServe(addr string) error {
 	return srv.ListenAndServe()
 }
 
+// actionView is a governance action plus its Constitutional Committee votes.
+type actionView struct {
+	store.ActionRow
+	Votes            []store.VoteRow
+	Yes, No, Abstain int
+}
+
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
+
 	actions, err := s.db.Actions(100)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	ids := make([]string, len(actions))
+	for i, a := range actions {
+		ids[i] = a.ProposalID
+	}
+	votes, err := s.db.VotesFor(ids)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	views := make([]actionView, 0, len(actions))
+	for _, a := range actions {
+		av := actionView{ActionRow: a, Votes: votes[a.ProposalID]}
+		for _, v := range av.Votes {
+			switch v.Vote {
+			case "Yes":
+				av.Yes++
+			case "No":
+				av.No++
+			case "Abstain":
+				av.Abstain++
+			}
+		}
+		views = append(views, av)
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tpl.Execute(w, actions); err != nil {
+	if err := s.tpl.Execute(w, views); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -64,6 +100,12 @@ var funcs = template.FuncMap{
 		}
 		return time.Unix(ts, 0).UTC().Format("2006-01-02")
 	},
+	"short": func(s string) string {
+		if len(s) <= 16 {
+			return s
+		}
+		return s[:8] + "…" + s[len(s)-6:]
+	},
 }
 
 // indexHTML is Cella-branded (forum navy + gold leaf + Cardano blue).
@@ -72,9 +114,9 @@ const indexHTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cella — Governance Actions</title>
+<title>Cella — Governance Actions &amp; CC Votes</title>
 <style>
-  :root { --forum:#0A0E27; --veil:#131A40; --ivory:#FAF7EE; --body:#cfd6ec; --muted:#8b93b8; --gold:#C9892A; --goldb:#F5D27A; --blue:#4d78ff; }
+  :root { --forum:#0A0E27; --veil:#131A40; --ivory:#FAF7EE; --body:#cfd6ec; --muted:#8b93b8; --gold:#C9892A; --goldb:#F5D27A; --blue:#4d78ff; --green:#4bbd88; --red:#d9695f; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--forum); color:var(--body); font-family:'EB Garamond',Georgia,serif; }
   header { padding:34px 6vw 18px; border-bottom:1px solid rgba(201,137,42,.25); }
@@ -88,8 +130,14 @@ const indexHTML = `<!doctype html>
   th { font-family:'Cinzel',serif; color:var(--gold); font-size:12px; letter-spacing:.12em; text-transform:uppercase; }
   td.type { color:var(--goldb); white-space:nowrap; font-size:14px; }
   td.title { color:var(--ivory); }
-  td.id { font-family:ui-monospace,Consolas,monospace; font-size:12px; color:var(--muted); word-break:break-all; }
+  td.id { font-family:ui-monospace,Consolas,monospace; font-size:12px; color:var(--muted); }
   td a { color:var(--blue); text-decoration:none; }
+  .tally { font-size:13px; white-space:nowrap; }
+  .tally .y { color:var(--green); } .tally .n { color:var(--red); } .tally .a { color:var(--muted); }
+  .votes { margin-top:6px; }
+  .votes .v { font-size:12.5px; margin:2px 0; }
+  .votes .v b.y { color:var(--green); } .votes .v b.n { color:var(--red); } .votes .v b.a { color:var(--muted); }
+  .votes .cc { font-family:ui-monospace,Consolas,monospace; color:var(--muted); font-size:11px; }
   .empty { margin-top:20px; padding:22px; border:1px dashed rgba(201,137,42,.35); border-radius:12px; color:var(--muted); }
   .empty code { color:var(--goldb); }
   footer { padding:20px 6vw; color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
@@ -101,25 +149,41 @@ const indexHTML = `<!doctype html>
   <div class="tag">Self-hostable Cardano Constitutional Committee governance</div>
 </header>
 <main>
-  <h2>Governance actions</h2>
+  <h2>Governance actions &amp; Constitutional Committee votes</h2>
   {{if .}}
   <table>
-    <thead><tr><th>Date</th><th>Type</th><th>Title</th><th>Action ID</th></tr></thead>
+    <thead><tr><th>Date</th><th>Type</th><th>Action</th><th>CC votes &amp; rationales</th></tr></thead>
     <tbody>
       {{range .}}
       <tr>
         <td>{{date .BlockTime}}</td>
         <td class="type">{{.Type}}</td>
-        <td class="title">{{if .Title}}{{.Title}}{{else}}<span style="color:var(--muted)">(no anchored title)</span>{{end}}
-          {{if .MetaURL}}<div style="margin-top:3px"><a href="{{.MetaURL}}" rel="noopener">rationale anchor ↗</a></div>{{end}}
+        <td class="title">
+          {{if .Title}}{{.Title}}{{else}}<span style="color:var(--muted)">(no anchored title)</span>{{end}}
+          <div class="id">{{short .ProposalID}}</div>
         </td>
-        <td class="id">{{.ProposalID}}</td>
+        <td>
+          {{if .Votes}}
+          <div class="tally"><b class="y">{{.Yes}} Yes</b> · <b class="n">{{.No}} No</b> · <b class="a">{{.Abstain}} Abstain</b></div>
+          <div class="votes">
+            {{range .Votes}}
+            <div class="v">
+              <b class="{{if eq .Vote "Yes"}}y{{else if eq .Vote "No"}}n{{else}}a{{end}}">{{.Vote}}</b>
+              <span class="cc">{{short .VoterID}}</span>
+              {{if .RationaleURL}}· <a href="{{.RationaleURL}}" rel="noopener">rationale ↗</a>{{end}}
+            </div>
+            {{end}}
+          </div>
+          {{else}}
+          <span style="color:var(--muted)">no CC votes yet</span>
+          {{end}}
+        </td>
       </tr>
       {{end}}
     </tbody>
   </table>
   {{else}}
-  <div class="empty">No governance actions yet. Run <code>cella ingest</code> to pull them from Koios.</div>
+  <div class="empty">No governance actions yet. Run <code>cella ingest</code> to pull actions and CC votes from Koios.</div>
   {{end}}
 </main>
 <footer>Cella · built &amp; maintained by Awen LLC · Apache-2.0</footer>

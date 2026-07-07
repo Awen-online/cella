@@ -77,15 +77,34 @@ func runIngest(cfg config.Config, args []string) error {
 	}
 	defer db.Close()
 
-	actions, err := koios.New(cfg.KoiosURL, cfg.KoiosToken).GovernanceActions(context.Background(), *limit)
+	ctx := context.Background()
+	kc := koios.New(cfg.KoiosURL, cfg.KoiosToken)
+
+	actions, err := kc.GovernanceActions(ctx, *limit)
 	if err != nil {
 		return err
 	}
-	n, err := db.UpsertActions(actions)
+	na, err := db.UpsertActions(actions)
 	if err != nil {
 		return err
 	}
-	log.Printf("ingested %d governance actions (%d new/updated) into %s", len(actions), n, cfg.DBPath)
+
+	// For each action, pull its on-chain votes and keep the CC ones.
+	votesTotal := 0
+	for _, a := range actions {
+		votes, err := kc.ProposalVotes(ctx, a.ProposalID)
+		if err != nil {
+			log.Printf("  warn: votes for %s: %v", a.ProposalID, err)
+			continue
+		}
+		nv, err := db.UpsertVotes(a.ProposalID, votes)
+		if err != nil {
+			return err
+		}
+		votesTotal += nv
+	}
+
+	log.Printf("ingested %d governance actions (%d written) and %d CC votes into %s", len(actions), na, votesTotal, cfg.DBPath)
 	return nil
 }
 

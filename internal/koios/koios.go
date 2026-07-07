@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -91,6 +92,47 @@ func (c *Client) GovernanceActions(ctx context.Context, limit int) ([]Governance
 	var out []GovernanceAction
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("decode proposal_list: %w", err)
+	}
+	return out, nil
+}
+
+// Vote is a single on-chain vote cast on a governance action. VoterRole is one
+// of ConstitutionalCommittee, DRep, or SPO; MetaURL anchors the rationale.
+type Vote struct {
+	VoterRole string `json:"voter_role"`
+	VoterID   string `json:"voter_id"`
+	Vote      string `json:"vote"`
+	MetaURL   string `json:"meta_url"`
+	BlockTime int64  `json:"block_time"`
+}
+
+// ProposalVotes fetches every on-chain vote cast on a single governance action.
+func (c *Client) ProposalVotes(ctx context.Context, proposalID string) ([]Vote, error) {
+	u := fmt.Sprintf("%s/proposal_votes?_proposal_id=%s", c.baseURL, url.QueryEscape(proposalID))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("koios %s: %s", resp.Status, strings.TrimSpace(string(b)))
+	}
+
+	var out []Vote
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode proposal_votes: %w", err)
 	}
 	return out, nil
 }

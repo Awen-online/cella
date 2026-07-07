@@ -65,3 +65,51 @@ func TestUpsertAndActions(t *testing.T) {
 		}
 	}
 }
+
+func TestUpsertVotesFiltersCCAndGroups(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	votes := []koios.Vote{
+		{VoterRole: "ConstitutionalCommittee", VoterID: "cc_hot_1", Vote: "Yes", MetaURL: "ipfs://r1", BlockTime: 10},
+		{VoterRole: "ConstitutionalCommittee", VoterID: "cc_hot_2", Vote: "No", BlockTime: 11},
+		{VoterRole: "DRep", VoterID: "drep_1", Vote: "Yes", BlockTime: 12},
+		{VoterRole: "SPO", VoterID: "pool_1", Vote: "Abstain", BlockTime: 13},
+	}
+	n, err := db.UpsertVotes("gov_action1", votes)
+	if err != nil {
+		t.Fatalf("UpsertVotes: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("stored %d votes, want 2 (CC only, DRep/SPO filtered out)", n)
+	}
+
+	grouped, err := db.VotesFor([]string{"gov_action1", "gov_action_absent"})
+	if err != nil {
+		t.Fatalf("VotesFor: %v", err)
+	}
+	got := grouped["gov_action1"]
+	if len(got) != 2 {
+		t.Fatalf("VotesFor returned %d votes, want 2", len(got))
+	}
+	// Ordered by cc_hot_id: cc_hot_1 (with rationale) then cc_hot_2.
+	if got[0].VoterID != "cc_hot_1" || got[0].RationaleURL != "ipfs://r1" {
+		t.Errorf("first vote = %+v, want cc_hot_1 with rationale ipfs://r1", got[0])
+	}
+	if got[1].Vote != "No" {
+		t.Errorf("second vote = %q, want No", got[1].Vote)
+	}
+
+	// Re-upsert is idempotent (same proposal + cc_hot_id), and updates the vote.
+	votes[0].Vote = "Abstain"
+	if _, err := db.UpsertVotes("gov_action1", votes); err != nil {
+		t.Fatalf("re-upsert votes: %v", err)
+	}
+	grouped, _ = db.VotesFor([]string{"gov_action1"})
+	if len(grouped["gov_action1"]) != 2 {
+		t.Errorf("after re-upsert got %d votes, want 2 (no duplicates)", len(grouped["gov_action1"]))
+	}
+}
