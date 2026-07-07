@@ -15,6 +15,7 @@ import (
 
 	"github.com/Awen-online/cella/internal/config"
 	"github.com/Awen-online/cella/internal/koios"
+	"github.com/Awen-online/cella/internal/llm"
 	"github.com/Awen-online/cella/internal/server"
 	"github.com/Awen-online/cella/internal/store"
 )
@@ -35,6 +36,8 @@ func main() {
 	switch cmd {
 	case "ingest":
 		err = runIngest(cfg, args)
+	case "review":
+		err = runReview(cfg, args)
 	case "serve":
 		err = runServe(cfg, args)
 	case "version", "-v", "--version":
@@ -52,15 +55,19 @@ func usage() {
 	fmt.Fprint(os.Stderr, `cella — self-hostable Cardano Constitutional Committee governance
 
 usage:
-  cella ingest    pull governance actions from Koios into the local database
+  cella ingest    pull governance actions + CC votes from Koios into the database
+  cella review    assess stored actions against the Constitution (bring your own LLM)
   cella serve     start the web UI
   cella version   print the version
 
-configuration (environment, all optional):
-  CELLA_DB      path to the SQLite database   (default ./cella.db)
-  CELLA_ADDR    web server listen address     (default :8080)
-  KOIOS_URL     Koios API base URL            (default https://api.koios.rest/api/v1)
-  KOIOS_TOKEN   optional Koios bearer token
+configuration (environment):
+  CELLA_DB         path to the SQLite database   (default ./cella.db)
+  CELLA_ADDR       web server listen address     (default :8080)
+  KOIOS_URL        Koios API base URL            (default https://api.koios.rest/api/v1)
+  KOIOS_TOKEN      optional Koios bearer token
+  CELLA_LLM_URL    OpenAI-compatible endpoint    (e.g. http://localhost:11434/v1 for Ollama)
+  CELLA_LLM_MODEL  model name                    (e.g. gpt-4o-mini, llama3.1)
+  CELLA_LLM_KEY    optional API key (local models need none)
 `)
 }
 
@@ -123,4 +130,58 @@ func runServe(cfg config.Config, args []string) error {
 
 	log.Printf("cella %s serving on http://localhost%s", version, *addr)
 	return server.New(db).ListenAndServe(*addr)
+}
+
+func runReview(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("review", flag.ExitOnError)
+	limit := fs.Int("limit", 20, "max actions to review")
+	force := fs.Bool("force", false, "re-review actions that already have a review")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if cfg.LLMURL == "" || cfg.LLMModel == "" {
+		return fmt.Errorf("no model configured: set CELLA_LLM_URL and CELLA_LLM_MODEL " +
+			"(e.g. a local Ollama at http://localhost:11434/v1 with model llama3.1)")
+	}
+
+	db, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	actions, err := db.Actions(*limit)
+	if err != nil {
+		return err
+	}
+	ids := make([]string, len(actions))
+	for i, a := range actions {
+		ids[i] = a.ProposalID
+	}
+	existing, err := db.ReviewsFor(ids)
+	if err != nil {
+		return err
+	}
+
+	prov := llm.NewOpenAICompatible(cfg.LLMURL, cfg.LLMModel, cfg.LLMKey)
+	ctx := context.Background()
+	reviewed := 0
+	for _, a := range actions {
+		if _, done := existing[a.ProposalID]; done && !*force {
+			continue
+		}
+		as, err := prov.Assess(ctx, llm.ActionInput{Type: a.Type, Title: a.Title, Abstract: a.Abstract})
+		if err != nil {
+			log.Printf("  warn: review %s: %v", a.ProposalID, err)
+			continue
+		}
+		if err := db.UpsertReview(a.ProposalID, as.Verdict, as.Summary, as.Model); err != nil {
+			return err
+		}
+		reviewed++
+		log.Printf("  %s -> %s", a.ProposalID, as.Verdict)
+	}
+	log.Printf("reviewed %d actions with %s", reviewed, cfg.LLMModel)
+	return nil
 }

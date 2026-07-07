@@ -113,3 +113,34 @@ func TestUpsertVotesFiltersCCAndGroups(t *testing.T) {
 		t.Errorf("after re-upsert got %d votes, want 2 (no duplicates)", len(grouped["gov_action1"]))
 	}
 }
+
+func TestUpsertReviewRoundTrip(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.UpsertReview("gov_action1", "uncertain", "Not enough detail.", "llama3.1"); err != nil {
+		t.Fatalf("UpsertReview: %v", err)
+	}
+	// Overwrite with an updated verdict (idempotent on proposal_id).
+	if err := db.UpsertReview("gov_action1", "constitutional", "Aligns with the treasury rules.", "gpt-4o-mini"); err != nil {
+		t.Fatalf("UpsertReview overwrite: %v", err)
+	}
+
+	got, err := db.ReviewsFor([]string{"gov_action1", "absent"})
+	if err != nil {
+		t.Fatalf("ReviewsFor: %v", err)
+	}
+	r, ok := got["gov_action1"]
+	if !ok {
+		t.Fatal("review not found")
+	}
+	if r.Verdict != "constitutional" || r.Model != "gpt-4o-mini" {
+		t.Errorf("got %+v, want constitutional / gpt-4o-mini", r)
+	}
+	if _, ok := got["absent"]; ok {
+		t.Error("absent proposal should have no review")
+	}
+}
