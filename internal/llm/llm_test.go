@@ -30,7 +30,7 @@ func TestOpenAICompatibleAssess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := NewOpenAICompatible(srv.URL, "test-model", "test-key")
+	p := NewOpenAICompatible(srv.URL, "test-model", "test-key", "")
 	a, err := p.Assess(context.Background(), ActionInput{Type: "TreasuryWithdrawals", Title: "Fund a public good"})
 	if err != nil {
 		t.Fatalf("Assess: %v", err)

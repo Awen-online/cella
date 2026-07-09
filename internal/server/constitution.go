@@ -1,93 +1,29 @@
 package server
 
 import (
-	"bytes"
-	"embed"
 	"html/template"
 	"net/http"
 
-	"github.com/yuin/goldmark"
+	"github.com/Awen-online/cella/internal/constitution"
 )
-
-// constitutionFS holds the versioned Cardano Constitution markdown, embedded so
-// the binary stays self-contained (no external files to ship).
-//
-//go:embed constitution/*.md
-var constitutionFS embed.FS
-
-// constVersion is one published revision of the Constitution.
-type constVersion struct {
-	Key     string // ?v= url key
-	Label   string // display label
-	File    string // embedded path
-	Current bool
-}
-
-// constVersions lists revisions newest-first; the Current one is the default.
-var constVersions = []constVersion{
-	{Key: "v2.4", Label: "v2.4 · current", File: "constitution/v2.4-current.md", Current: true},
-	{Key: "v1", Label: "v1", File: "constitution/v1.md"},
-	{Key: "v0", Label: "v0 · interim", File: "constitution/v0-interim.md"},
-}
-
-// md renders markdown with goldmark's safe defaults (raw HTML is escaped).
-var md = goldmark.New()
-
-// constCache memoizes rendered HTML per version key.
-var constCache = map[string]template.HTML{}
-
-// renderConstitution returns the rendered HTML and resolved version for key,
-// defaulting to the current revision when key is empty or unknown.
-func renderConstitution(key string) (template.HTML, *constVersion, error) {
-	var v *constVersion
-	for i := range constVersions {
-		if constVersions[i].Key == key {
-			v = &constVersions[i]
-			break
-		}
-	}
-	if v == nil {
-		for i := range constVersions {
-			if constVersions[i].Current {
-				v = &constVersions[i]
-				break
-			}
-		}
-	}
-	if h, ok := constCache[v.Key]; ok {
-		return h, v, nil
-	}
-	raw, err := constitutionFS.ReadFile(v.File)
-	if err != nil {
-		return "", v, err
-	}
-	var buf bytes.Buffer
-	if err := md.Convert(raw, &buf); err != nil {
-		return "", v, err
-	}
-	// Trusted, embedded content — safe to render as HTML.
-	h := template.HTML(buf.String()) //nolint:gosec
-	constCache[v.Key] = h
-	return h, v, nil
-}
 
 type constPage struct {
 	Body     template.HTML
 	Active   string
 	Label    string
-	Versions []constVersion
+	Versions []constitution.Version
 }
 
 // handleConstitution serves the Cardano Constitution, the yardstick against
 // which the committee judges every governance action.
 func (s *Server) handleConstitution(w http.ResponseWriter, r *http.Request) {
-	body, v, err := renderConstitution(r.URL.Query().Get("v"))
+	body, v, err := constitution.HTML(r.URL.Query().Get("v"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.ctpl.Execute(w, constPage{Body: body, Active: v.Key, Label: v.Label, Versions: constVersions}); err != nil {
+	if err := s.ctpl.Execute(w, constPage{Body: body, Active: v.Key, Label: v.Label, Versions: constitution.Versions}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }

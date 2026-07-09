@@ -14,6 +14,7 @@ import (
 	"os"
 
 	"github.com/Awen-online/cella/internal/config"
+	"github.com/Awen-online/cella/internal/constitution"
 	"github.com/Awen-online/cella/internal/koios"
 	"github.com/Awen-online/cella/internal/llm"
 	"github.com/Awen-online/cella/internal/server"
@@ -164,7 +165,13 @@ func runReview(cfg config.Config, args []string) error {
 		return err
 	}
 
-	prov := llm.NewOpenAICompatible(cfg.LLMURL, cfg.LLMModel, cfg.LLMKey)
+	constText, constVer, err := constitution.Text("")
+	if err != nil {
+		return fmt.Errorf("load constitution: %w", err)
+	}
+	log.Printf("grounding review against the Cardano Constitution %s", constVer.Label)
+
+	prov := llm.NewOpenAICompatible(cfg.LLMURL, cfg.LLMModel, cfg.LLMKey, constText)
 	ctx := context.Background()
 	reviewed := 0
 	for _, a := range actions {
