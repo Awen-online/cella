@@ -19,6 +19,7 @@ type Server struct {
 	tpl  *template.Template
 	dtpl *template.Template
 	ctpl *template.Template
+	etpl *template.Template
 }
 
 // New builds a Server backed by db.
@@ -29,21 +30,26 @@ func New(db *store.DB) *Server {
 		tpl:  template.Must(template.New("index").Funcs(funcs).Parse(indexHTML)),
 		dtpl: template.Must(template.New("detail").Funcs(funcs).Parse(detailHTML)),
 		ctpl: template.Must(template.New("constitution").Parse(constHTML)),
+		etpl: template.Must(template.New("enter").Parse(enterHTML)),
 	}
 	s.mux.HandleFunc("/", s.handleIndex)
 	s.mux.HandleFunc("/action/", s.handleAction)
 	s.mux.HandleFunc("/constitution", s.handleConstitution)
+	s.mux.HandleFunc("/enter", s.handleEnter)
+	s.mux.HandleFunc("/auth/member", s.handleMemberLogin)
+	s.mux.HandleFunc("/logout", s.handleLogout)
 	s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("ok"))
 	})
 	return s
 }
 
-// ListenAndServe starts the server on addr.
+// ListenAndServe starts the server on addr. The private chamber sits behind the
+// entry splash via the session gate.
 func (s *Server) ListenAndServe(addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           s.mux,
+		Handler:           s.gate(s.mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return srv.ListenAndServe()
@@ -185,12 +191,17 @@ const indexHTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cella — Governance Actions &amp; CC Votes</title>
 <style>
-  :root { --forum:#0A0E27; --veil:#131A40; --ivory:#FAF7EE; --body:#cfd6ec; --muted:#8b93b8; --gold:#C9892A; --goldb:#F5D27A; --blue:#4d78ff; --green:#4bbd88; --red:#d9695f; }
+  :root { --forum:#0A0E27; --veil:#131A40; --ivory:#FAF7EE; --body:#cfd6ec; --muted:#8b93b8; --gold:#C9892A; --goldb:#F5D27A; --blue:#6f93ff; --green:#4bbd88; --red:#d9695f; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--forum); color:var(--body); font-family:'EB Garamond',Georgia,serif; }
   header { padding:34px 6vw 18px; border-bottom:1px solid rgba(201,137,42,.25); }
   header .name { font-family:'Cinzel',serif; font-weight:800; letter-spacing:.06em; color:var(--ivory); font-size:30px; }
   header .name b { color:var(--gold); }
+  header .topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  header .brand { display:flex; align-items:center; gap:13px; }
+  header .badge { width:42px; height:42px; flex:0 0 auto; }
+  header a.leave { color:var(--muted); text-decoration:none; font-family:'Cinzel',serif; font-size:11px; letter-spacing:.1em; text-transform:uppercase; white-space:nowrap; }
+  header a.leave:hover { color:var(--gold); }
   header .tag { color:var(--muted); font-size:15px; margin-top:4px; }
   header a.nav { display:inline-block; margin-top:10px; color:var(--goldb); text-decoration:none; font-family:'Cinzel',serif; font-size:12px; letter-spacing:.1em; text-transform:uppercase; border:1px solid rgba(245,210,122,.4); border-radius:999px; padding:4px 14px; }
   header a.nav:hover { background:rgba(245,210,122,.12); }
@@ -225,7 +236,13 @@ const indexHTML = `<!doctype html>
 </head>
 <body>
 <header>
-  <div class="name">CE<b>LL</b>A</div>
+  <div class="topbar">
+    <div class="brand">
+      <svg class="badge" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Cella"><rect width="100" height="100" rx="22" fill="#0A0E27"></rect><g transform="translate(18,16) scale(0.64)"><path d="M22 86 L22 42 A28 28 0 0 1 78 42 L78 86" fill="none" stroke="#FAF7EE" stroke-width="9"></path><rect x="11" y="84" width="78" height="9" rx="1.5" fill="#FAF7EE"></rect><circle cx="50" cy="62" r="6.5" fill="#F5D27A"></circle></g></svg>
+      <span class="name">CE<b>LL</b>A</span>
+    </div>
+    <a class="leave" href="/logout">Leave the chamber &#8617;</a>
+  </div>
   <div class="tag">Self-hostable Cardano Constitutional Committee governance</div>
   <a class="nav" href="/constitution">Read the Constitution →</a>
 </header>
@@ -242,7 +259,7 @@ const indexHTML = `<!doctype html>
         <td class="type">{{.Type}}</td>
         <td class="title">
           <a class="atitle" href="/action/{{.Slug}}">{{if .Title}}{{.Title}}{{else}}(no anchored title){{end}}</a>
-          <div class="id">{{short .ProposalID}}</div>
+          <div class="id">{{short .ProposalID}} · <a href="https://adastat.net/governances/{{.TxHash}}" target="_blank" rel="noopener">AdaStat &#8599;</a></div>
           {{if .HasReview}}
           <div class="review">
             <span class="pill {{.Review.Verdict}}">AI · {{.Review.Verdict}}</span>
@@ -287,7 +304,7 @@ const detailHTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{if .Title}}{{.Title}}{{else}}Governance action{{end}} — Cella</title>
 <style>
-  :root { --forum:#0A0E27; --veil:#131A40; --ivory:#FAF7EE; --body:#cfd6ec; --muted:#8b93b8; --gold:#C9892A; --goldb:#F5D27A; --blue:#4d78ff; --green:#4bbd88; --red:#d9695f; }
+  :root { --forum:#0A0E27; --veil:#131A40; --ivory:#FAF7EE; --body:#cfd6ec; --muted:#8b93b8; --gold:#C9892A; --goldb:#F5D27A; --blue:#6f93ff; --green:#4bbd88; --red:#d9695f; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--forum); color:var(--body); font-family:'EB Garamond',Georgia,serif; }
   header { padding:34px 6vw 18px; border-bottom:1px solid rgba(201,137,42,.25); }
@@ -332,7 +349,8 @@ const detailHTML = `<!doctype html>
   <div class="meta">
     Seen {{date .BlockTime}}{{if .Expiration.Valid}} · expires {{date .Expiration.Int64}}{{end}}<br>
     <code>{{.ProposalID}}</code>
-    {{if .MetaURL}}<br><a href="{{.MetaURL}}" rel="noopener">Anchor metadata ↗</a>{{end}}
+    <br><a href="https://adastat.net/governances/{{.TxHash}}" target="_blank" rel="noopener">View on AdaStat &#8599;</a>
+    {{if .MetaURL}}&nbsp;·&nbsp;<a href="{{.MetaURL}}" rel="noopener">Anchor metadata &#8599;</a>{{end}}
   </div>
 
   {{if .HasReview}}
