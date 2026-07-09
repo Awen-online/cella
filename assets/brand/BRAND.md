@@ -1,8 +1,8 @@
-# Cardano Curia — Brand Spec
+# Cardano Curia: Brand Spec
 
 Portable brand reference for Cardano Curia and related products (e.g. a
 standalone Cella product). The single source of truth for tokens is
-`brand.css` in this same folder — treat this document as the human-readable
+`brand.css` in this same folder; treat this document as the human-readable
 digest, and `brand.css` as the implementation. Copy this entire `brand-kit/`
 folder into a new product to inherit the brand wholesale.
 
@@ -15,9 +15,9 @@ language is **inscription-on-stone** (carved capitals, gold leaf, laurel,
 marble/parchment), deliberately *warm and classical* to stake out a niche
 away from the cool-blue "another protocol" crowd.
 
-- **Wordmark convention:** Latin `V`-for-`U` — "Cvria Cardani" / "Cvria".
+- **Wordmark convention:** Latin `V`-for-`U`: "Cvria Cardani" / "Cvria".
 - **Tagline:** *Integritas ante omnia* ("Integrity above all").
-- **Tone:** formal, civic, deliberative — "the Senate / the Mandate / the
+- **Tone:** formal, civic, deliberative: "the Senate / the Mandate / the
   Record," not "dashboard / feed / app."
 
 ## 2. The mark
@@ -37,7 +37,7 @@ changes by role:
 v9; one-color reproduction → v4. Alternates (`v1` legacy bronze, `v5`
 unified-blue, `v6` antique-gold, `v7` marble) require a written rationale.
 
-The wreath is a single traced SVG path reused across all variants — only
+The wreath is a single traced SVG path reused across all variants; only
 `fill` (and v3's filter) change. Vector source and the traced original live
 under `logo/_source/`.
 
@@ -51,12 +51,12 @@ under `logo/_source/`.
 --cc-blue-tint:   #E3EBFA;  /* surfaces, callouts */
 
 /* Gold leaf family */
---cc-gold:        #C9892A;  /* mid gold — solid fill, eyebrows */
+--cc-gold:        #C9892A;  /* mid gold, solid fill, eyebrows */
 --cc-gold-bright: #F5D27A;  /* highlight */
 --cc-gold-deep:   #7A5418;  /* shadow, hairline rules */
 --cc-gold-ink:    #5E3F08;  /* gold used as small body type */
 
-/* Neutrals — marble / parchment */
+/* Neutrals: marble / parchment */
 --cc-parchment:   #FAF7EE;  /* page bg */
 --cc-marble:      #F4ECD8;  /* card bg / alt section */
 --cc-veined:      #ECE2C5;  /* divider tint */
@@ -93,7 +93,7 @@ Google Fonts load string (used site-wide):
 https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800;900&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap
 ```
 
-Key rules (Cinzel reads thin — always pin weights explicitly):
+Key rules (Cinzel reads thin, so always pin weights explicitly):
 
 - **Display / h1–h3:** Cinzel **900**, uppercase, `letter-spacing: 0.04–0.06em`.
 - **h4–h6:** Cinzel 800.
@@ -115,11 +115,11 @@ Key rules (Cinzel reads thin — always pin weights explicitly):
   shadow; hover lifts to a gold border.
 - **Section** (`.cc-section`): vertical rhythm `clamp(3rem,6vw,6rem)`;
   `.cc-section-marble` and `.cc-section-forum` (dark) variants.
-- **Gold rule** (`.cc-rule`): centered ornament with gradient hairlines — the
+- **Gold rule** (`.cc-rule`): centered ornament with gradient hairlines; the
   signature divider.
 - **Geometry:** radii 6/10/18px; rules are 1px `--cc-gold-deep`.
 - **Shadows:** always soft, never harsh (`--cc-shadow-1/2/gold`).
-- **Focus:** 2px `--cc-blue-bright` outline, 3px offset — keep for a11y.
+- **Focus:** 2px `--cc-blue-bright` outline, 3px offset; keep for a11y.
 
 ## 6. Reusing this in a standalone product
 
@@ -131,5 +131,5 @@ Key rules (Cinzel reads thin — always pin weights explicitly):
    `--cc-forum` background + gold-bright accents.
 4. Site identity strings: name "Cardano Curia", tagline / description
    "Integritas ante omnia".
-5. Keep `brand.css` as the single source of truth — don't fork the tokens. If
+5. Keep `brand.css` as the single source of truth; don't fork the tokens. If
    the brand evolves, update `brand.css` here first, then propagate.

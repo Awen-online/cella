@@ -11,7 +11,7 @@
 
 Cella gives Constitutional Committee members and consortia a single workflow for their on-chain duties: ingest governance actions, assess constitutionality with LLM assistance and other checks, deliberate with members, vote internally, author the committee's final rationale, and package and submit the vote and rationale on-chain.
 
-It runs standalone (no WordPress required), so any Constitutional Committee or consortium — such as [Cardano Curia](https://cardanocuria.com) — can self-host it.
+It runs standalone (no WordPress required), so any Constitutional Committee or consortium, such as [Cardano Curia](https://cardanocuria.com) can self-host it.
 
 ## What it does
 
@@ -28,11 +28,11 @@ Cardano Constitutional Committee members, CC consortia (such as Cardano Curia), 
 
 ## Status
 
-Cella is being rebuilt from an existing WordPress deployment (live at [cardanocuria.com](https://cardanocuria.com)) into a **standalone, single-binary tool** — no WordPress, no database server, no runtime dependencies. The first slice (governance-action ingest + web view) is in this repo. See [MAINTAINERS.md](MAINTAINERS.md) for the roadmap.
+Cella is being rebuilt from an existing WordPress deployment (live at [cardanocuria.com](https://cardanocuria.com)) into a **standalone, single-binary tool**: no WordPress, no database server, no runtime dependencies. The first slice (governance-action ingest + web view) is in this repo. See [MAINTAINERS.md](MAINTAINERS.md) for the roadmap.
 
 ## Quickstart
 
-Cella is a single Go binary. Build it once, then run — it creates its own local SQLite database.
+Cella is a single Go binary. Build it once, then run. It creates its own local SQLite database.
 
 ```bash
 git clone https://github.com/Awen-online/cella
@@ -46,7 +46,7 @@ go build -o cella .
 
 That's the whole install. Configuration is optional and by environment (see [`.env.example`](.env.example)): `CELLA_DB`, `CELLA_ADDR`, `KOIOS_URL`, `KOIOS_TOKEN`. Point `KOIOS_URL` at a Preprod/Preview instance to work against testnets.
 
-No API key is required — Koios is a public, decentralized Cardano query layer.
+No API key is required. Koios is a public, decentralized Cardano query layer.
 
 ## Part of the Awen ecosystem
 
@@ -54,7 +54,7 @@ Cella is built and maintained by [Awen](https://awen.online), a studio building 
 
 ## Brand & assets
 
-Brand guidelines and logo marks live in [`assets/brand/`](assets/brand/). See [`assets/brand/BRAND.md`](assets/brand/BRAND.md) for the full specification (color tokens, typography, components), and [`assets/brand/logo/`](assets/brand/logo/) for the marks — two directions (*aedicula* and *chamber*), each in gold-leaf, gold-solid, ink, and ivory-on-forum finishes.
+Brand guidelines and logo marks live in [`assets/brand/`](assets/brand/). See [`assets/brand/BRAND.md`](assets/brand/BRAND.md) for the full specification (color tokens, typography, components), and [`assets/brand/logo/`](assets/brand/logo/) for the marks: two directions (*aedicula* and *chamber*), each in gold-leaf, gold-solid, ink, and ivory-on-forum finishes.
 
 ## License
 
