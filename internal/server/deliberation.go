@@ -34,6 +34,21 @@ var demoRationales = map[string][]string{
 	},
 }
 
+// stanceFor returns a member's deterministic demo stance on an action, if that
+// member is part of the demo body. Used to show the signed-in delegate their
+// own chamber position (vote + rationale) on the index and the ballot form.
+func stanceFor(proposalID, member string) (MemberStance, bool) {
+	if member == "" {
+		return MemberStance{}, false
+	}
+	for _, st := range deliberate(proposalID, demoBody.Members) {
+		if st.Name == member {
+			return st, true
+		}
+	}
+	return MemberStance{}, false
+}
+
 // deliberate returns a deterministic demo deliberation for an action: each
 // member's stance + rationale, keyed off the proposal id so it's stable.
 func deliberate(proposalID string, members []Member) []MemberStance {

@@ -83,9 +83,13 @@ type actionView struct {
 	Committee []CommitteeSeat
 
 	// The signed-in delegate's own internal position (drives the cast form).
+	// YourVote/YourRationale show the effective stance (a recorded vote if the
+	// delegate has cast one, otherwise their demo chamber stance); YouRecorded
+	// is true only once they have actually recorded a position.
 	You           string
 	YourVote      string
 	YourRationale string
+	YouRecorded   bool
 }
 
 // CommitteeSeat is one CC member's position on an action (or a pending seat).
@@ -155,7 +159,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			av.Review, av.HasReview = rv, true
 		}
 		if mv, ok := myVotes[a.ProposalID]; ok {
-			av.YourVote = mv.Vote
+			av.YourVote = mv.Vote // a recorded position overrides the demo stance
+		} else if st, ok := stanceFor(a.ProposalID, you); ok {
+			av.YourVote = st.Vote // otherwise show the delegate's chamber stance
 		}
 		views = append(views, av)
 	}
@@ -225,9 +231,13 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	you := strings.TrimSuffix(func() string { m, _ := s.member(r); return m }(), " (demo)")
 	av.You = you
-	if mv, ok := realVotes[you]; ok {
-		av.YourVote, av.YourRationale = mv.Vote, mv.Rationale
+	for _, st := range av.Deliberation {
+		if st.Name == you {
+			av.YourVote, av.YourRationale = st.Vote, st.Rationale
+			break
+		}
 	}
+	_, av.YouRecorded = realVotes[you]
 
 	for _, st := range av.Deliberation {
 		switch st.Vote {
@@ -478,6 +488,7 @@ const detailHTML = `<!doctype html>
   .drole { color:var(--muted); font-family:'EB Garamond',serif; font-size:12.5px; font-weight:400; letter-spacing:0; text-transform:none; margin-left:6px; }
   .drat { color:var(--body); font-size:14.5px; line-height:1.5; margin-top:3px; }
   .realtag { color:var(--green); font-family:'Cinzel',serif; font-size:9px; letter-spacing:.08em; text-transform:uppercase; border:1px solid rgba(75,189,136,.5); border-radius:999px; padding:1px 7px; margin-left:8px; }
+  .castnote { font-size:13.5px; color:var(--muted); margin:2px 0 12px; line-height:1.5; }
   .castradios { display:flex; gap:10px; margin:6px 0 12px; flex-wrap:wrap; }
   .cr { display:inline-flex; align-items:center; gap:7px; border:1px solid rgba(201,137,42,.3); border-radius:999px; padding:8px 16px; cursor:pointer; font-size:14px; color:var(--body); }
   .cr input { accent-color:var(--gold); }
@@ -539,6 +550,7 @@ const detailHTML = `<!doctype html>
   {{if .You}}
   <div class="card" id="your-position">
     <h2>Your position &middot; {{.You}}</h2>
+    {{if .YouRecorded}}<div class="castnote">You have recorded this position. Update it any time before the committee submits.</div>{{else}}<div class="castnote">Showing your chamber stance for this action. Record it to confirm it as your position.</div>{{end}}
     <form method="post" action="/vote" class="castform">
       <input type="hidden" name="slug" value="{{.Slug}}">
       <div class="castradios">
@@ -547,7 +559,7 @@ const detailHTML = `<!doctype html>
         <label class="cr"><input type="radio" name="vote" value="Abstain" {{if eq .YourVote "Abstain"}}checked{{end}}>Abstain</label>
       </div>
       <textarea name="rationale" placeholder="Your rationale (recorded for the body)…">{{.YourRationale}}</textarea>
-      <div><button type="submit" class="cast-btn">{{if .YourVote}}Update my position{{else}}Record my position{{end}}</button></div>
+      <div><button type="submit" class="cast-btn">{{if .YouRecorded}}Update my position{{else}}Record my position{{end}}</button></div>
     </form>
   </div>
   {{end}}
