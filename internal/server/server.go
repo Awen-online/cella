@@ -76,6 +76,19 @@ type actionView struct {
 	Deliberation    []MemberStance
 	ChYes, ChNo, ChAb int
 	ChamberPosition string
+
+	// Full Constitutional Committee roster for this action (all seats; a seat
+	// with Voted=false is shown grayed as awaiting a vote).
+	Committee []CommitteeSeat
+}
+
+// CommitteeSeat is one CC member's position on an action (or a pending seat).
+type CommitteeSeat struct {
+	Name       string
+	Credential string
+	Voted      bool
+	Vote       string
+	Rationale  string
 }
 
 // idxView is the data for the actions index: the signed-in member + the rows.
@@ -205,6 +218,26 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		av.ChamberPosition = "No consensus yet"
 	}
 
+	// Full committee roster: every seat, voted or awaiting.
+	byCred := make(map[string]store.VoteRow, len(av.Votes))
+	for _, v := range av.Votes {
+		byCred[v.VoterID] = v
+	}
+	seen := make(map[string]bool, len(ccCommittee))
+	for _, m := range ccCommittee {
+		seat := CommitteeSeat{Name: m.Name, Credential: m.Credential}
+		if v, ok := byCred[m.Credential]; ok {
+			seat.Voted, seat.Vote, seat.Rationale = true, v.Vote, v.RationaleURL
+		}
+		seen[m.Credential] = true
+		av.Committee = append(av.Committee, seat)
+	}
+	for _, v := range av.Votes {
+		if !seen[v.VoterID] {
+			av.Committee = append(av.Committee, CommitteeSeat{Name: ccMemberName(v.VoterID), Credential: v.VoterID, Voted: true, Vote: v.Vote, Rationale: v.RationaleURL})
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.dtpl.Execute(w, av); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -274,7 +307,7 @@ const indexHTML = `<!doctype html>
   .pill.unconstitutional { color:var(--red); border-color:rgba(217,105,95,.5); }
   .pill.uncertain { color:var(--goldb); border-color:rgba(245,210,122,.5); }
   .rsum { font-size:13px; color:var(--body); margin-top:4px; max-width:520px; }
-  .legend { color:var(--muted); font-size:13px; margin-top:6px; font-style:italic; }
+  .legend { color:var(--muted); font-size:15px; margin-top:8px; font-style:italic; }
   .empty { margin-top:20px; padding:22px; border:1px dashed rgba(201,137,42,.35); border-radius:12px; color:var(--muted); }
   .empty code { color:var(--goldb); }
   footer { padding:20px 6vw; color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
@@ -356,11 +389,11 @@ const detailHTML = `<!doctype html>
   header { padding:34px 6vw 18px; border-bottom:1px solid rgba(201,137,42,.25); }
   header .name { font-family:'Cinzel',serif; font-weight:800; letter-spacing:.06em; color:var(--ivory); font-size:24px; }
   header .name b { color:var(--gold); }
-  header a.back { color:var(--blue); text-decoration:none; font-size:14px; }
+  header a.back { color:var(--blue); text-decoration:none; font-size:15.5px; }
   main { padding:24px 6vw 60px; max-width:900px; }
   h1 { font-family:'Cinzel',serif; color:var(--ivory); font-weight:700; font-size:24px; letter-spacing:.02em; line-height:1.25; margin:6px 0 4px; }
   .type { color:var(--goldb); font-size:13px; text-transform:uppercase; letter-spacing:.08em; font-family:'Cinzel',serif; }
-  .meta { color:var(--muted); font-size:13px; margin-top:8px; line-height:1.6; }
+  .meta { color:var(--muted); font-size:15px; margin-top:8px; line-height:1.65; }
   .meta code { font-family:ui-monospace,Consolas,monospace; color:var(--body); font-size:12px; word-break:break-all; }
   .meta a { color:var(--blue); text-decoration:none; }
   .card { background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:18px 20px; margin-top:20px; }
@@ -388,6 +421,9 @@ const detailHTML = `<!doctype html>
   table.votes td.cc { font-family:ui-monospace,Consolas,monospace; color:var(--muted); font-size:12px; word-break:break-all; }
   table.votes td a { color:var(--blue); text-decoration:none; }
   .muted { color:var(--muted); }
+  .votes tr.pending { opacity:.42; }
+  .await { color:var(--muted); font-family:'Cinzel',serif; font-size:11px; letter-spacing:.06em; text-transform:uppercase; }
+  .seatsof { color:var(--muted); font-size:13px; }
   .chpos { font-size:14px; color:var(--muted); margin-bottom:14px; }
   .chpos b { color:var(--ivory); }
   .chpos .y { color:var(--green); } .chpos .n { color:var(--red); } .chpos .a { color:var(--muted); }
@@ -456,24 +492,20 @@ const detailHTML = `<!doctype html>
   </div>
 
   <div class="card">
-    <h2>Constitutional Committee votes</h2>
-    {{if .Votes}}
-    <div class="tally"><b class="y">{{.Yes}} Yes</b> · <b class="n">{{.No}} No</b> · <b class="a">{{.Abstain}} Abstain</b></div>
+    <h2>Constitutional Committee &mdash; {{len .Committee}} seats</h2>
+    <div class="tally"><b class="y">{{.Yes}} Yes</b> · <b class="n">{{.No}} No</b> · <b class="a">{{.Abstain}} Abstain</b> <span class="seatsof">of {{len .Committee}} seats</span></div>
     <table class="votes">
-      <thead><tr><th>Vote</th><th>CC hot credential</th><th>Rationale</th></tr></thead>
+      <thead><tr><th>Vote</th><th>Committee member</th><th>Rationale</th></tr></thead>
       <tbody>
-        {{range .Votes}}
-        <tr>
-          <td class="vote"><b class="{{if eq .Vote "Yes"}}y{{else if eq .Vote "No"}}n{{else}}a{{end}}">{{.Vote}}</b></td>
-          <td class="cc">{{$n := ccname .VoterID}}{{if $n}}<span class="ccname">{{$n}}</span><br>{{end}}{{.VoterID}}</td>
-          <td>{{if .RationaleURL}}<a href="{{.RationaleURL}}" rel="noopener">rationale ↗</a>{{else}}<span class="muted">—</span>{{end}}</td>
+        {{range .Committee}}
+        <tr class="{{if not .Voted}}pending{{end}}">
+          <td class="vote">{{if .Voted}}<b class="{{if eq .Vote "Yes"}}y{{else if eq .Vote "No"}}n{{else}}a{{end}}">{{.Vote}}</b>{{else}}<span class="await">Awaiting</span>{{end}}</td>
+          <td class="cc">{{if .Name}}<span class="ccname">{{.Name}}</span><br>{{end}}{{.Credential}}</td>
+          <td>{{if .Rationale}}<a href="{{.Rationale}}" rel="noopener">rationale ↗</a>{{else}}<span class="muted">—</span>{{end}}</td>
         </tr>
         {{end}}
       </tbody>
     </table>
-    {{else}}
-    <div class="muted">No Constitutional Committee votes recorded yet.</div>
-    {{end}}
   </div>
 </main>
 <footer>Cella · built &amp; maintained by Awen LLC · Apache-2.0</footer>
