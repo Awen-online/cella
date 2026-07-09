@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,6 +118,8 @@ ON CONFLICT(proposal_id) DO UPDATE SET
 // ActionRow is a governance action as stored, for display.
 type ActionRow struct {
 	ProposalID string
+	TxHash     string
+	Idx        int
 	Type       string
 	Title      string
 	Abstract   string
@@ -125,13 +128,20 @@ type ActionRow struct {
 	Expiration sql.NullInt64
 }
 
+// Slug is a URL-safe identifier for the action's detail page. The bech32/hash
+// proposal_id can contain '#', which is unsafe in a URL path, so we key detail
+// pages on tx_hash + cert index instead.
+func (r ActionRow) Slug() string {
+	return r.TxHash + "-" + strconv.Itoa(r.Idx)
+}
+
 // Actions returns stored governance actions, newest first.
 func (d *DB) Actions(limit int) ([]ActionRow, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	rows, err := d.sql.Query(`
-SELECT proposal_id, type, title, COALESCE(abstract, ''), meta_url, block_time, expiration
+SELECT proposal_id, tx_hash, idx, type, title, COALESCE(abstract, ''), meta_url, block_time, expiration
 FROM governance_actions
 ORDER BY block_time DESC
 LIMIT ?`, limit)
@@ -143,12 +153,40 @@ LIMIT ?`, limit)
 	var out []ActionRow
 	for rows.Next() {
 		var r ActionRow
-		if err := rows.Scan(&r.ProposalID, &r.Type, &r.Title, &r.Abstract, &r.MetaURL, &r.BlockTime, &r.Expiration); err != nil {
+		if err := rows.Scan(&r.ProposalID, &r.TxHash, &r.Idx, &r.Type, &r.Title, &r.Abstract, &r.MetaURL, &r.BlockTime, &r.Expiration); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// ActionBySlug returns a single governance action by its URL slug
+// (tx_hash + "-" + cert index). The bool is false when no action matches.
+func (d *DB) ActionBySlug(slug string) (ActionRow, bool, error) {
+	var r ActionRow
+	i := strings.LastIndex(slug, "-")
+	if i < 0 {
+		return r, false, nil
+	}
+	idx, err := strconv.Atoi(slug[i+1:])
+	if err != nil {
+		return r, false, nil
+	}
+	txHash := slug[:i]
+
+	row := d.sql.QueryRow(`
+SELECT proposal_id, tx_hash, idx, type, title, COALESCE(abstract, ''), meta_url, block_time, expiration
+FROM governance_actions
+WHERE tx_hash = ? AND idx = ?`, txHash, idx)
+	err = row.Scan(&r.ProposalID, &r.TxHash, &r.Idx, &r.Type, &r.Title, &r.Abstract, &r.MetaURL, &r.BlockTime, &r.Expiration)
+	if err == sql.ErrNoRows {
+		return r, false, nil
+	}
+	if err != nil {
+		return r, false, err
+	}
+	return r, true, nil
 }
 
 // UpsertVotes stores the Constitutional Committee votes among those cast on
