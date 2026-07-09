@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -43,6 +44,58 @@ func TestOpenAICompatibleAssess(t *testing.T) {
 	}
 	if a.Model != "test-model" {
 		t.Errorf("model = %q, want test-model", a.Model)
+	}
+}
+
+// TestAssessGroundsReviewInConstitution verifies that when a Constitution is
+// configured, its text is sent to the model in the system prompt (alongside the
+// base instruction) — i.e. the review is grounded in the actual document rather
+// than the model's training memory.
+func TestAssessGroundsReviewInConstitution(t *testing.T) {
+	const marker = "ARTICLE-SENTINEL-9F3: the treasury shall not be raided"
+
+	var gotSystem string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		for _, m := range req.Messages {
+			if m.Role == "system" {
+				gotSystem = m.Content
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"role": "assistant", "content": `{"verdict":"uncertain","summary":"n/a"}`}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := NewOpenAICompatible(srv.URL, "test-model", "", marker)
+	if _, err := p.Assess(context.Background(), ActionInput{Type: "InfoAction", Title: "t"}); err != nil {
+		t.Fatalf("Assess: %v", err)
+	}
+
+	if !strings.Contains(gotSystem, marker) {
+		t.Errorf("system prompt did not include the Constitution text; got:\n%s", gotSystem)
+	}
+	if !strings.Contains(gotSystem, systemPrompt) {
+		t.Error("system prompt dropped the base instruction")
+	}
+	if !strings.Contains(gotSystem, "CARDANO CONSTITUTION") {
+		t.Error("system prompt missing the Constitution delimiter/heading")
+	}
+}
+
+// TestSystemMessageWithoutConstitution verifies that with no Constitution
+// configured, the system prompt is exactly the base instruction (no grounding
+// block appended).
+func TestSystemMessageWithoutConstitution(t *testing.T) {
+	p := NewOpenAICompatible("http://example.invalid", "m", "", "")
+	if got := p.systemMessage(); got != systemPrompt {
+		t.Errorf("expected bare system prompt, got:\n%s", got)
 	}
 }
 
