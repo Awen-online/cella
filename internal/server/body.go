@@ -25,7 +25,7 @@ type Body struct {
 // demoBody is the Cardano Curia roster used for the demo splash.
 var demoBody = Body{
 	Name:  "Cardano Curia",
-	Kind:  "Constitutional Committee delegate body",
+	Kind:  "Constitutional Committee member",
 	Blurb: "A consortium that deliberates on Cardano governance actions, assesses their constitutionality, and casts a single committee vote with a shared rationale.",
 	Members: []Member{
 		{Name: "Faustina Vela", Role: "Delegate · Treasury & Withdrawals", Address: "stake1uy9v3k7m2q0f8xw4r6p2n5c8t3l7d1s4h9j0a2b6e5g8c9q7wq2demo01"},

@@ -27,12 +27,13 @@ func New(db *store.DB) *Server {
 	s := &Server{
 		db:   db,
 		mux:  http.NewServeMux(),
-		tpl:  template.Must(template.New("index").Funcs(funcs).Parse(indexHTML)),
-		dtpl: template.Must(template.New("detail").Funcs(funcs).Parse(detailHTML)),
-		ctpl: template.Must(template.New("constitution").Parse(constHTML)),
-		etpl: template.Must(template.New("enter").Parse(enterHTML)),
+		tpl:  template.Must(template.New("index").Funcs(funcs).Parse(withFonts(indexHTML))),
+		dtpl: template.Must(template.New("detail").Funcs(funcs).Parse(withFonts(detailHTML))),
+		ctpl: template.Must(template.New("constitution").Parse(withFonts(constHTML))),
+		etpl: template.Must(template.New("enter").Parse(withFonts(enterHTML))),
 	}
 	s.mux.HandleFunc("/", s.handleIndex)
+	s.mux.HandleFunc("/fonts/", s.handleFonts)
 	s.mux.HandleFunc("/action/", s.handleAction)
 	s.mux.HandleFunc("/constitution", s.handleConstitution)
 	s.mux.HandleFunc("/enter", s.handleEnter)
@@ -65,12 +66,19 @@ type actionView struct {
 	Yes, No, Abstain int
 	Review           store.ReviewRow
 	HasReview        bool
+	AbstractHTML     template.HTML
 
 	// Chamber deliberation (demo): the body's internal member stances.
 	BodyName        string
 	Deliberation    []MemberStance
 	ChYes, ChNo, ChAb int
 	ChamberPosition string
+}
+
+// idxView is the data for the actions index: the signed-in member + the rows.
+type idxView struct {
+	Member  string
+	Actions []actionView
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -119,8 +127,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		views = append(views, av)
 	}
 
+	m, _ := s.member(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tpl.Execute(w, views); err != nil {
+	if err := s.tpl.Execute(w, idxView{Member: m, Actions: views}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -169,6 +178,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	if rv, ok := reviews[a.ProposalID]; ok {
 		av.Review, av.HasReview = rv, true
 	}
+	av.AbstractHTML = mdHTML(a.Abstract)
 
 	// Chamber deliberation (demo): how the body's delegates are leaning.
 	av.BodyName = demoBody.Name
@@ -211,6 +221,7 @@ var funcs = template.FuncMap{
 		}
 		return s[:8] + "…" + s[len(s)-6:]
 	},
+	"ccname": ccMemberName,
 }
 
 // indexHTML is Cella-branded (forum navy + gold leaf + Cardano blue).
@@ -232,6 +243,8 @@ const indexHTML = `<!doctype html>
   header .badge { width:42px; height:42px; flex:0 0 auto; }
   header a.leave { color:var(--muted); text-decoration:none; font-family:'Cinzel',serif; font-size:11px; letter-spacing:.1em; text-transform:uppercase; white-space:nowrap; }
   header a.leave:hover { color:var(--gold); }
+  header .who { display:flex; align-items:center; gap:14px; }
+  header .whoami { color:var(--goldb); font-family:'Cinzel',serif; font-size:11px; letter-spacing:.1em; text-transform:uppercase; white-space:nowrap; }
   header .tag { color:var(--muted); font-size:15px; margin-top:4px; }
   header a.nav { display:inline-block; margin-top:10px; color:var(--goldb); text-decoration:none; font-family:'Cinzel',serif; font-size:12px; letter-spacing:.1em; text-transform:uppercase; border:1px solid rgba(245,210,122,.4); border-radius:999px; padding:4px 14px; }
   header a.nav:hover { background:rgba(245,210,122,.12); }
@@ -271,7 +284,7 @@ const indexHTML = `<!doctype html>
       <svg class="badge" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Cella"><rect width="100" height="100" rx="22" fill="#0A0E27"></rect><g transform="translate(18,16) scale(0.64)"><path d="M22 86 L22 42 A28 28 0 0 1 78 42 L78 86" fill="none" stroke="#FAF7EE" stroke-width="9"></path><rect x="11" y="84" width="78" height="9" rx="1.5" fill="#FAF7EE"></rect><circle cx="50" cy="62" r="6.5" fill="#F5D27A"></circle></g></svg>
       <span class="name">CE<b>LL</b>A</span>
     </div>
-    <a class="leave" href="/logout">Leave the chamber &#8617;</a>
+    <div class="who">{{if .Member}}<span class="whoami">Signed in as {{.Member}}</span>{{end}}<a class="leave" href="/logout">Sign out</a></div>
   </div>
   <div class="tag">Self-hostable Cardano Constitutional Committee governance</div>
   <a class="nav" href="/constitution">Read the Constitution →</a>
@@ -279,17 +292,17 @@ const indexHTML = `<!doctype html>
 <main>
   <h2>Governance actions &amp; Constitutional Committee votes</h2>
   <div class="legend">Constitutionality tags are AI-assisted assessments — the committee decides and signs. Run <code>cella review</code> to generate them with your own model.</div>
-  {{if .}}
+  {{if .Actions}}
   <table>
     <thead><tr><th>Date</th><th>Type</th><th>Action</th><th>CC votes &amp; rationales</th></tr></thead>
     <tbody>
-      {{range .}}
+      {{range .Actions}}
       <tr>
         <td>{{date .BlockTime}}</td>
         <td class="type">{{.Type}}</td>
         <td class="title">
           <a class="atitle" href="/action/{{.Slug}}">{{if .Title}}{{.Title}}{{else}}(no anchored title){{end}}</a>
-          <div class="id">{{short .ProposalID}} · <a href="https://adastat.net/governances/{{.TxHash}}" target="_blank" rel="noopener">AdaStat &#8599;</a></div>
+          <div class="id">{{short .ProposalID}} · <a href="https://adastat.net/governances/{{.GovID}}" target="_blank" rel="noopener">AdaStat &#8599;</a></div>
           {{if .HasReview}}
           <div class="review">
             <span class="pill {{.Review.Verdict}}">AI · {{.Review.Verdict}}</span>
@@ -304,7 +317,7 @@ const indexHTML = `<!doctype html>
             {{range .Votes}}
             <div class="v">
               <b class="{{if eq .Vote "Yes"}}y{{else if eq .Vote "No"}}n{{else}}a{{end}}">{{.Vote}}</b>
-              <span class="cc">{{short .VoterID}}</span>
+              <span class="cc">{{$n := ccname .VoterID}}{{if $n}}{{$n}}{{else}}{{short .VoterID}}{{end}}</span>
               {{if .RationaleURL}}· <a href="{{.RationaleURL}}" rel="noopener">rationale ↗</a>{{end}}
             </div>
             {{end}}
@@ -349,7 +362,14 @@ const detailHTML = `<!doctype html>
   .meta a { color:var(--blue); text-decoration:none; }
   .card { background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:18px 20px; margin-top:20px; }
   .card h2 { font-family:'Cinzel',serif; color:var(--gold); font-size:13px; letter-spacing:.12em; text-transform:uppercase; margin:0 0 10px; }
-  .abstract { color:var(--body); font-size:15.5px; line-height:1.55; white-space:pre-wrap; }
+  .abstract { color:var(--body); font-size:15.5px; line-height:1.6; }
+  .abstract p { margin:0 0 10px; }
+  .abstract ul, .abstract ol { padding-left:22px; margin:8px 0; }
+  .abstract li { margin:4px 0; }
+  .abstract a { color:var(--blue); }
+  .abstract h1, .abstract h2, .abstract h3 { color:var(--ivory); font-family:'Cinzel',serif; font-size:16px; margin:16px 0 6px; }
+  .abstract code { font-family:ui-monospace,Consolas,monospace; font-size:13px; color:var(--goldb); }
+  .ccname { color:var(--goldb); font-family:'Cinzel',serif; font-size:12px; letter-spacing:.03em; }
   .pill { display:inline-block; font-family:'Cinzel',serif; font-size:10px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; padding:3px 10px; border-radius:999px; border:1px solid; }
   .pill.constitutional { color:var(--green); border-color:rgba(75,189,136,.5); }
   .pill.unconstitutional { color:var(--red); border-color:rgba(217,105,95,.5); }
@@ -390,7 +410,7 @@ const detailHTML = `<!doctype html>
   <div class="meta">
     Seen {{date .BlockTime}}{{if .Expiration.Valid}} · expires {{date .Expiration.Int64}}{{end}}<br>
     <code>{{.ProposalID}}</code>
-    <br><a href="https://adastat.net/governances/{{.TxHash}}" target="_blank" rel="noopener">View on AdaStat &#8599;</a>
+    <br><a href="https://adastat.net/governances/{{.GovID}}" target="_blank" rel="noopener">View on AdaStat &#8599;</a>
     {{if .MetaURL}}&nbsp;·&nbsp;<a href="{{.MetaURL}}" rel="noopener">Anchor metadata &#8599;</a>{{end}}
   </div>
 
@@ -406,7 +426,7 @@ const detailHTML = `<!doctype html>
   {{if .Abstract}}
   <div class="card">
     <h2>Abstract</h2>
-    <div class="abstract">{{.Abstract}}</div>
+    <div class="abstract">{{.AbstractHTML}}</div>
   </div>
   {{end}}
 
@@ -436,7 +456,7 @@ const detailHTML = `<!doctype html>
         {{range .Votes}}
         <tr>
           <td class="vote"><b class="{{if eq .Vote "Yes"}}y{{else if eq .Vote "No"}}n{{else}}a{{end}}">{{.Vote}}</b></td>
-          <td class="cc">{{.VoterID}}</td>
+          <td class="cc">{{$n := ccname .VoterID}}{{if $n}}<span class="ccname">{{$n}}</span><br>{{end}}{{.VoterID}}</td>
           <td>{{if .RationaleURL}}<a href="{{.RationaleURL}}" rel="noopener">rationale ↗</a>{{else}}<span class="muted">—</span>{{end}}</td>
         </tr>
         {{end}}

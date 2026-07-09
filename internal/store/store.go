@@ -135,6 +135,12 @@ func (r ActionRow) Slug() string {
 	return r.TxHash + "-" + strconv.Itoa(r.Idx)
 }
 
+// GovID is the on-chain governance-action id used by explorers (AdaStat,
+// Cardanoscan): the tx hash followed by the cert index as two hex digits.
+func (r ActionRow) GovID() string {
+	return r.TxHash + fmt.Sprintf("%02x", r.Idx)
+}
+
 // Actions returns stored governance actions, newest first.
 func (d *DB) Actions(limit int) ([]ActionRow, error) {
 	if limit <= 0 {

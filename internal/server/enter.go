@@ -52,6 +52,15 @@ const enterHTML = `<!doctype html>
   .connect .hint { color:var(--muted); font-size:13px; margin-top:12px; }
   .connect .hint b { color:var(--body); }
   #wallet-msg { color:var(--goldb); font-size:13px; margin-top:10px; min-height:1.2em; }
+  #wallet-modal { display:none; position:fixed; inset:0; background:rgba(8,10,26,.82); z-index:100; align-items:center; justify-content:center; padding:20px; }
+  #wallet-modal .box { background:var(--veil); border:1px solid rgba(201,137,42,.3); border-radius:16px; padding:22px 22px 18px; max-width:360px; width:100%; }
+  #wallet-modal h3 { font-family:'Cinzel',serif; color:var(--ivory); font-size:13px; letter-spacing:.12em; text-transform:uppercase; margin:0 0 14px; text-align:center; }
+  #wallet-list { display:flex; flex-direction:column; gap:8px; }
+  .wpick { display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:var(--forum); border:1px solid rgba(201,137,42,.25); border-radius:10px; padding:12px 14px; cursor:pointer; color:var(--ivory); font-family:'EB Garamond',Georgia,serif; font-size:16px; }
+  .wpick:hover { border-color:var(--goldb); }
+  .wpick img { width:26px; height:26px; border-radius:6px; flex:0 0 auto; }
+  .wpick span { text-transform:capitalize; }
+  #wallet-modal .cancel { display:block; margin:14px auto 0; background:none; border:0; color:var(--muted); font-size:13px; cursor:pointer; }
   a:focus-visible, button:focus-visible { outline:2px solid var(--goldb); outline-offset:3px; }
   footer { color:var(--muted); font-size:12.5px; margin-top:40px; text-align:center; font-family:'JetBrains Mono',ui-monospace,monospace; }
   @media (prefers-reduced-motion:no-preference){ h1.salve{ animation:fade .6s ease both; } @keyframes fade{ from{opacity:0; transform:translateY(6px);} to{opacity:1;} } }
@@ -96,37 +105,81 @@ const enterHTML = `<!doctype html>
     </div>
   </div>
 
+  <div id="wallet-modal" role="dialog" aria-modal="true" aria-label="Choose a wallet">
+    <div class="box">
+      <h3>Choose a wallet</h3>
+      <div id="wallet-list"></div>
+      <button type="button" class="cancel" id="wallet-cancel">Cancel</button>
+    </div>
+  </div>
+
   <footer>Cella · self-hostable Constitutional Committee governance · Apache-2.0</footer>
 
   <script>
-  // Real CIP-30 connect-and-sign: the wallet signs a server-issued challenge
-  // (CIP-8), the server verifies the Ed25519 signature. No funds move.
-  document.getElementById('btn-wallet').addEventListener('click', async function () {
+  // Real CIP-30 connect-and-sign with a wallet picker: choose a wallet, it signs
+  // a server-issued challenge (CIP-8), the server verifies the Ed25519 signature.
+  (function () {
+    var btn = document.getElementById('btn-wallet');
     var msg = document.getElementById('wallet-msg');
-    function fail(t){ msg.textContent = t + ' You can enter as a member below.'; }
-    try {
-      var names = Object.keys(window.cardano || {}).filter(function (k) {
-        return window.cardano[k] && typeof window.cardano[k].enable === 'function';
-      });
-      if (!names.length) { fail('No Cardano wallet found in this browser.'); return; }
-      msg.textContent = 'Connecting ' + (window.cardano[names[0]].name || names[0]) + '…';
-      var api = await window.cardano[names[0]].enable();
-      var used = await api.getUsedAddresses();
-      var addr = (used && used[0]) || (await api.getRewardAddresses())[0];
-      if (!addr) { fail('Could not read an address from the wallet.'); return; }
-      var ch = await (await fetch('/auth/challenge')).json();
-      msg.textContent = 'Awaiting your signature…';
-      var signed = await api.signData(addr, ch.challenge);
-      var res = await fetch('/auth/verify', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: addr, signature: signed.signature, key: signed.key })
-      });
-      if (res.ok) { location.href = '/'; return; }
-      var e = await res.json(); fail('Sign-in failed (' + (e.error || 'unknown') + ').');
-    } catch (err) {
-      fail('Sign-in was cancelled or failed (' + ((err && err.message) || err) + ').');
+    var modal = document.getElementById('wallet-modal');
+    var list = document.getElementById('wallet-list');
+    var cancel = document.getElementById('wallet-cancel');
+
+    function errText(e) {
+      if (!e) return 'unknown';
+      if (typeof e === 'string') return e;
+      if (e.info) return e.info;
+      if (e.message) return e.message;
+      try { return JSON.stringify(e); } catch (x) { return String(e); }
     }
-  });
+    function wallets() {
+      return Object.keys(window.cardano || {}).filter(function (k) {
+        var w = window.cardano[k];
+        return w && typeof w.enable === 'function' && typeof w.icon !== 'undefined';
+      });
+    }
+
+    async function signIn(key) {
+      modal.style.display = 'none';
+      var w = window.cardano[key];
+      try {
+        msg.textContent = 'Connecting ' + (w.name || key) + '…';
+        var api = await w.enable();
+        var rew = await api.getRewardAddresses();
+        var addr = (rew && rew[0]) || (await api.getUsedAddresses())[0];
+        if (!addr) { msg.textContent = 'Could not read an address from ' + (w.name || key) + '.'; return; }
+        var ch = await (await fetch('/auth/challenge')).json();
+        msg.textContent = 'Approve the signature in ' + (w.name || key) + '…';
+        var signed = await api.signData(addr, ch.challenge);
+        var res = await fetch('/auth/verify', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address: addr, signature: signed.signature, key: signed.key })
+        });
+        if (res.ok) { location.href = '/'; return; }
+        var je = await res.json();
+        msg.textContent = 'Sign-in failed (' + (je.error || 'unknown') + '). Enter as a member below.';
+      } catch (err) {
+        msg.textContent = 'Sign-in cancelled or failed (' + errText(err) + '). Enter as a member below.';
+      }
+    }
+
+    btn.addEventListener('click', function () {
+      var ws = wallets();
+      if (!ws.length) { msg.textContent = 'No Cardano wallet found in this browser. Install Eternl/Lace, or enter as a member below.'; return; }
+      if (ws.length === 1) { signIn(ws[0]); return; }
+      list.innerHTML = '';
+      ws.forEach(function (k) {
+        var w = window.cardano[k];
+        var b = document.createElement('button'); b.type = 'button'; b.className = 'wpick';
+        b.innerHTML = (w.icon ? '<img src="' + w.icon + '" alt="">' : '') + '<span>' + (w.name || k) + '</span>';
+        b.addEventListener('click', function () { signIn(k); });
+        list.appendChild(b);
+      });
+      modal.style.display = 'flex';
+    });
+    cancel.addEventListener('click', function () { modal.style.display = 'none'; });
+    modal.addEventListener('click', function (e) { if (e.target === modal) modal.style.display = 'none'; });
+  })();
   </script>
 </body>
 </html>`

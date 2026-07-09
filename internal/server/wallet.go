@@ -98,9 +98,8 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Authenticated. Label the session for Cardano Curia (this committee).
-	label := "Cardano Curia · " + shortAddr(req.Address)
-	s.setMember(w, label)
+	// Authenticated. For the demo this wallet is Cullah (a Cardano Curia delegate).
+	s.setMember(w, "Cullah")
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "redirect": "/"})
 }
 
