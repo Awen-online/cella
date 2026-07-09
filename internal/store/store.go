@@ -339,6 +339,32 @@ FROM member_votes WHERE proposal_id = ?`, proposalID)
 	return out, rows.Err()
 }
 
+// MemberVotesByMember returns one member's internal votes across all actions,
+// keyed by proposal_id (for showing "your vote" on the actions index).
+func (d *DB) MemberVotesByMember(member string) (map[string]MemberVote, error) {
+	out := map[string]MemberVote{}
+	if member == "" {
+		return out, nil
+	}
+	rows, err := d.sql.Query(`
+SELECT proposal_id, COALESCE(vote,''), COALESCE(rationale,'')
+FROM member_votes WHERE member = ?`, member)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pid string
+		var m MemberVote
+		m.Member = member
+		if err := rows.Scan(&pid, &m.Vote, &m.Rationale); err != nil {
+			return nil, err
+		}
+		out[pid] = m
+	}
+	return out, rows.Err()
+}
+
 // ReviewsFor returns reviews for the given proposal IDs, keyed by proposal_id.
 func (d *DB) ReviewsFor(ids []string) (map[string]ReviewRow, error) {
 	out := map[string]ReviewRow{}

@@ -130,6 +130,14 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	m, _ := s.member(r)
+	you := strings.TrimSuffix(m, " (demo)")
+	myVotes, err := s.db.MemberVotesByMember(you)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	views := make([]actionView, 0, len(actions))
 	for _, a := range actions {
 		av := actionView{ActionRow: a, Votes: votes[a.ProposalID]}
@@ -146,10 +154,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		if rv, ok := reviews[a.ProposalID]; ok {
 			av.Review, av.HasReview = rv, true
 		}
+		if mv, ok := myVotes[a.ProposalID]; ok {
+			av.YourVote = mv.Vote
+		}
 		views = append(views, av)
 	}
 
-	m, _ := s.member(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tpl.Execute(w, idxView{Member: m, Actions: views}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -320,6 +330,11 @@ const indexHTML = `<!doctype html>
   .votes { margin-top:6px; }
   .votes .v { font-size:12.5px; margin:2px 0; }
   .votes .v b.y { color:var(--green); } .votes .v b.n { color:var(--red); } .votes .v b.a { color:var(--muted); }
+  .myvote { white-space:nowrap; }
+  .vpill { display:inline-block; font-family:'Cinzel',serif; font-size:11px; letter-spacing:.06em; text-transform:uppercase; font-weight:700; padding:3px 11px; border-radius:999px; border:1px solid; text-decoration:none; }
+  .vpill.y { color:var(--green); border-color:rgba(75,189,136,.5); } .vpill.n { color:var(--red); border-color:rgba(217,105,95,.5); } .vpill.a { color:var(--muted); border-color:rgba(139,147,184,.4); }
+  .vcast { font-size:12.5px; color:var(--goldb); text-decoration:none; border-bottom:1px dotted rgba(201,137,42,.5); white-space:nowrap; }
+  .vcast:hover { color:var(--gold); }
   .votes .cc { font-family:ui-monospace,Consolas,monospace; color:var(--muted); font-size:11px; }
   .review { margin-top:8px; }
   .pill { display:inline-block; font-family:'Cinzel',serif; font-size:10px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; padding:2px 8px; border-radius:999px; border:1px solid; }
@@ -350,7 +365,7 @@ const indexHTML = `<!doctype html>
   <div class="legend">Constitutionality tags are AI-assisted assessments — the committee decides and signs. Run <code>cella review</code> to generate them with your own model.</div>
   {{if .Actions}}
   <table>
-    <thead><tr><th>Date</th><th>Type</th><th>Action</th><th>CC votes &amp; rationales</th></tr></thead>
+    <thead><tr><th>Date</th><th>Type</th><th>Action</th><th>Your vote</th><th>CC votes &amp; rationales</th></tr></thead>
     <tbody>
       {{range .Actions}}
       <tr>
@@ -364,6 +379,13 @@ const indexHTML = `<!doctype html>
             <span class="pill {{.Review.Verdict}}">AI · {{.Review.Verdict}}</span>
             <div class="rsum">{{.Review.Summary}}</div>
           </div>
+          {{end}}
+        </td>
+        <td class="myvote">
+          {{if .YourVote}}
+          <a class="vpill {{if eq .YourVote "Yes"}}y{{else if eq .YourVote "No"}}n{{else}}a{{end}}" href="/action/{{.Slug}}#your-position">{{.YourVote}}</a>
+          {{else}}
+          <a class="vcast" href="/action/{{.Slug}}#your-position">Cast &rarr;</a>
           {{end}}
         </td>
         <td>
