@@ -20,6 +20,7 @@ type Server struct {
 	dtpl *template.Template
 	ctpl *template.Template
 	etpl *template.Template
+	stpl *template.Template
 }
 
 // New builds a Server backed by db.
@@ -31,10 +32,12 @@ func New(db *store.DB) *Server {
 		dtpl: template.Must(template.New("detail").Funcs(funcs).Parse(withFonts(detailHTML))),
 		ctpl: template.Must(template.New("constitution").Parse(withFonts(constHTML))),
 		etpl: template.Must(template.New("enter").Parse(withFonts(enterHTML))),
+		stpl: template.Must(template.New("submit").Parse(withFonts(submitHTML))),
 	}
 	s.mux.HandleFunc("/", s.handleIndex)
 	s.mux.HandleFunc("/fonts/", s.handleFonts)
 	s.mux.HandleFunc("/action/", s.handleAction)
+	s.mux.HandleFunc("/submit/", s.handleSubmit)
 	s.mux.HandleFunc("/constitution", s.handleConstitution)
 	s.mux.HandleFunc("/enter", s.handleEnter)
 	s.mux.HandleFunc("/auth/member", s.handleMemberLogin)
@@ -396,6 +399,8 @@ const detailHTML = `<!doctype html>
   .dname { color:var(--ivory); font-family:'Cinzel',serif; font-size:14px; font-weight:700; letter-spacing:.02em; }
   .drole { color:var(--muted); font-family:'EB Garamond',serif; font-size:12.5px; font-weight:400; letter-spacing:0; text-transform:none; margin-left:6px; }
   .drat { color:var(--body); font-size:14.5px; line-height:1.5; margin-top:3px; }
+  .submit-btn { display:inline-block; font-family:'Cinzel',serif; font-size:13px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; color:var(--forum); background:linear-gradient(180deg,var(--goldb),var(--gold)); text-decoration:none; border-radius:10px; padding:12px 22px; }
+  .submit-btn:hover { filter:brightness(1.05); }
   footer { padding:20px 6vw; color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
 </style>
 </head>
@@ -444,6 +449,10 @@ const detailHTML = `<!doctype html>
       </div>
       {{end}}
     </div>
+  </div>
+
+  <div style="margin:6px 0 2px;">
+    <a class="submit-btn" href="/submit/{{.Slug}}">Submit committee vote on-chain &#8594;</a>
   </div>
 
   <div class="card">

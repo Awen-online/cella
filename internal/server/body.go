@@ -32,6 +32,6 @@ var demoBody = Body{
 		{Name: "Cassius Aurel", Role: "Delegate · Protocol Parameters", Address: "stake1u84m2n7q9v0k3x8w1r5p6c2t7l4d9s3h8j1a0b5e2g7c6q4wq9demo02"},
 		{Name: "Junia Marcia", Role: "Delegate · Constitution & Precedent", Address: "stake1uxk9m3n2q7v8f0x4w6r1p5c9t2l8d3s7h4j6a1b0e9g5c8q3wq5demo03"},
 		{Name: "Titus Varo", Role: "Delegate · Community & Outreach", Address: "stake1u7n4m9q2v6k1x0w8r3p7c5t4l2d6s9h1j8a3b7e0g4c2q9wq6demo04"},
-		{Name: "Livia Serena", Role: "Delegate · At-large", Address: "stake1u9q2m7n4v0k8x3w1r6p2c7t5l9d4s8h3j1a6b2e5g0c7q4wq1demo05"},
+		{Name: "Cullah", Role: "Delegate · At-large", Address: "addr1q8ejkg9t0tkqxkms3nqe2e90rgdn680mg9vfq5ygd06j94d0xdpt8x0tr7mpserrhsssmh0d8ug7494ndwr53rcs3veq6dulc9"},
 	},
 }
