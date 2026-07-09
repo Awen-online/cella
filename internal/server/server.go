@@ -63,6 +63,12 @@ type actionView struct {
 	Yes, No, Abstain int
 	Review           store.ReviewRow
 	HasReview        bool
+
+	// Chamber deliberation (demo): the body's internal member stances.
+	BodyName        string
+	Deliberation    []MemberStance
+	ChYes, ChNo, ChAb int
+	ChamberPosition string
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +166,28 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if rv, ok := reviews[a.ProposalID]; ok {
 		av.Review, av.HasReview = rv, true
+	}
+
+	// Chamber deliberation (demo): how the body's delegates are leaning.
+	av.BodyName = demoBody.Name
+	av.Deliberation = deliberate(a.ProposalID, demoBody.Members)
+	for _, st := range av.Deliberation {
+		switch st.Vote {
+		case "Yes":
+			av.ChYes++
+		case "No":
+			av.ChNo++
+		case "Abstain":
+			av.ChAb++
+		}
+	}
+	switch {
+	case av.ChYes > av.ChNo && av.ChYes >= av.ChAb:
+		av.ChamberPosition = "Leaning to approve"
+	case av.ChNo > av.ChYes && av.ChNo >= av.ChAb:
+		av.ChamberPosition = "Leaning to reject"
+	default:
+		av.ChamberPosition = "No consensus yet"
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -335,6 +363,17 @@ const detailHTML = `<!doctype html>
   table.votes td.cc { font-family:ui-monospace,Consolas,monospace; color:var(--muted); font-size:12px; word-break:break-all; }
   table.votes td a { color:var(--blue); text-decoration:none; }
   .muted { color:var(--muted); }
+  .chpos { font-size:14px; color:var(--muted); margin-bottom:14px; }
+  .chpos b { color:var(--ivory); }
+  .chpos .y { color:var(--green); } .chpos .n { color:var(--red); } .chpos .a { color:var(--muted); }
+  .chpos .demo { font-family:'Cinzel',serif; font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--goldb); border:1px solid rgba(245,210,122,.4); border-radius:999px; padding:1px 8px; margin-left:6px; }
+  .delib-list { display:flex; flex-direction:column; gap:14px; }
+  .delib { display:grid; grid-template-columns:76px 1fr; gap:13px; align-items:start; }
+  .dvote { font-family:'Cinzel',serif; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; text-align:center; padding:6px 0; border-radius:8px; border:1px solid; }
+  .dvote.y { color:var(--green); border-color:rgba(75,189,136,.5); } .dvote.n { color:var(--red); border-color:rgba(217,105,95,.5); } .dvote.a { color:var(--muted); border-color:rgba(139,147,184,.4); }
+  .dname { color:var(--ivory); font-family:'Cinzel',serif; font-size:14px; font-weight:700; letter-spacing:.02em; }
+  .drole { color:var(--muted); font-family:'EB Garamond',serif; font-size:12.5px; font-weight:400; letter-spacing:0; text-transform:none; margin-left:6px; }
+  .drat { color:var(--body); font-size:14.5px; line-height:1.5; margin-top:3px; }
   footer { padding:20px 6vw; color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
 </style>
 </head>
@@ -368,6 +407,22 @@ const detailHTML = `<!doctype html>
     <div class="abstract">{{.Abstract}}</div>
   </div>
   {{end}}
+
+  <div class="card">
+    <h2>Chamber deliberation — {{.BodyName}}</h2>
+    <div class="chpos">Chamber position: <b>{{.ChamberPosition}}</b> &nbsp;·&nbsp; <span class="y">{{.ChYes}} Yes</span> · <span class="n">{{.ChNo}} No</span> · <span class="a">{{.ChAb}} Abstain</span> <span class="demo">demo</span></div>
+    <div class="delib-list">
+      {{range .Deliberation}}
+      <div class="delib">
+        <div class="dvote {{if eq .Vote "Yes"}}y{{else if eq .Vote "No"}}n{{else}}a{{end}}">{{.Vote}}</div>
+        <div>
+          <div class="dname">{{.Member.Name}} <span class="drole">{{.Member.Role}}</span></div>
+          <div class="drat">{{.Rationale}}</div>
+        </div>
+      </div>
+      {{end}}
+    </div>
+  </div>
 
   <div class="card">
     <h2>Constitutional Committee votes</h2>
