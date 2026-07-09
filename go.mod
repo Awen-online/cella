@@ -2,7 +2,10 @@ module github.com/Awen-online/cella
 
 go 1.22
 
-require modernc.org/sqlite v1.29.10
+require (
+	github.com/yuin/goldmark v1.8.2
+	modernc.org/sqlite v1.29.10
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

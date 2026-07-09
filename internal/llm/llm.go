@@ -43,22 +43,39 @@ const systemPrompt = `You are assisting a Cardano Constitutional Committee. Asse
 
 // OpenAICompatible calls any OpenAI-style /chat/completions endpoint.
 type OpenAICompatible struct {
-	baseURL string
-	model   string
-	key     string
-	http    *http.Client
+	baseURL      string
+	model        string
+	key          string
+	constitution string
+	http         *http.Client
 }
 
 // NewOpenAICompatible returns a provider for baseURL (e.g.
 // https://api.openai.com/v1, or http://localhost:11434/v1 for Ollama). key may
-// be empty, e.g. for local models.
-func NewOpenAICompatible(baseURL, model, key string) *OpenAICompatible {
+// be empty, e.g. for local models. constitution is the Constitution text used
+// to ground the model's assessment; when empty the model relies on its own
+// knowledge.
+func NewOpenAICompatible(baseURL, model, key, constitution string) *OpenAICompatible {
 	return &OpenAICompatible{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		model:   model,
-		key:     key,
-		http:    &http.Client{Timeout: 90 * time.Second},
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		model:        model,
+		key:          key,
+		constitution: constitution,
+		http:         &http.Client{Timeout: 120 * time.Second},
 	}
+}
+
+// systemMessage is the base instruction, grounded with the Constitution text
+// when one is configured so the model judges against the actual document
+// rather than its training memory.
+func (p *OpenAICompatible) systemMessage() string {
+	if strings.TrimSpace(p.constitution) == "" {
+		return systemPrompt
+	}
+	return systemPrompt +
+		"\n\nJudge strictly against the Constitution text below, and cite the relevant article or section in your reasoning where possible." +
+		"\n\n===== CARDANO CONSTITUTION (in force) =====\n" + p.constitution +
+		"\n===== END CONSTITUTION ====="
 }
 
 // Model reports the configured model name.
@@ -92,7 +109,7 @@ func (p *OpenAICompatible) Assess(ctx context.Context, in ActionInput) (Assessme
 	reqBody, _ := json.Marshal(chatRequest{
 		Model: p.model,
 		Messages: []chatMessage{
-			{Role: "system", Content: systemPrompt},
+			{Role: "system", Content: p.systemMessage()},
 			{Role: "user", Content: user},
 		},
 		Temperature: 0.1,
