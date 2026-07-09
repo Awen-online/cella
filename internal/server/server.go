@@ -18,6 +18,7 @@ type Server struct {
 	mux  *http.ServeMux
 	tpl  *template.Template
 	dtpl *template.Template
+	ctpl *template.Template
 }
 
 // New builds a Server backed by db.
@@ -27,9 +28,11 @@ func New(db *store.DB) *Server {
 		mux:  http.NewServeMux(),
 		tpl:  template.Must(template.New("index").Funcs(funcs).Parse(indexHTML)),
 		dtpl: template.Must(template.New("detail").Funcs(funcs).Parse(detailHTML)),
+		ctpl: template.Must(template.New("constitution").Parse(constHTML)),
 	}
 	s.mux.HandleFunc("/", s.handleIndex)
 	s.mux.HandleFunc("/action/", s.handleAction)
+	s.mux.HandleFunc("/constitution", s.handleConstitution)
 	s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("ok"))
 	})
@@ -189,6 +192,8 @@ const indexHTML = `<!doctype html>
   header .name { font-family:'Cinzel',serif; font-weight:800; letter-spacing:.06em; color:var(--ivory); font-size:30px; }
   header .name b { color:var(--gold); }
   header .tag { color:var(--muted); font-size:15px; margin-top:4px; }
+  header a.nav { display:inline-block; margin-top:10px; color:var(--goldb); text-decoration:none; font-family:'Cinzel',serif; font-size:12px; letter-spacing:.1em; text-transform:uppercase; border:1px solid rgba(245,210,122,.4); border-radius:999px; padding:4px 14px; }
+  header a.nav:hover { background:rgba(245,210,122,.12); }
   main { padding:24px 6vw 60px; }
   h2 { font-family:'Cinzel',serif; color:var(--ivory); font-weight:700; font-size:20px; letter-spacing:.04em; }
   table { width:100%; border-collapse:collapse; margin-top:14px; }
@@ -222,6 +227,7 @@ const indexHTML = `<!doctype html>
 <header>
   <div class="name">CE<b>LL</b>A</div>
   <div class="tag">Self-hostable Cardano Constitutional Committee governance</div>
+  <a class="nav" href="/constitution">Read the Constitution →</a>
 </header>
 <main>
   <h2>Governance actions &amp; Constitutional Committee votes</h2>
@@ -318,7 +324,7 @@ const detailHTML = `<!doctype html>
 <body>
 <header>
   <div class="name">CE<b>LL</b>A</div>
-  <a class="back" href="/">← All governance actions</a>
+  <a class="back" href="/">← All governance actions</a> &nbsp;·&nbsp; <a class="back" href="/constitution">Constitution</a>
 </header>
 <main>
   <div class="type">{{.Type}}</div>
