@@ -40,6 +40,7 @@ func New(db *store.DB) *Server {
 	s.mux.HandleFunc("/submit/", s.handleSubmit)
 	s.mux.HandleFunc("/constitution", s.handleConstitution)
 	s.mux.HandleFunc("/enter", s.handleEnter)
+	s.mux.HandleFunc("/vote", s.handleCastVote)
 	s.mux.HandleFunc("/auth/member", s.handleMemberLogin)
 	s.mux.HandleFunc("/auth/challenge", s.handleChallenge)
 	s.mux.HandleFunc("/auth/verify", s.handleVerify)
@@ -80,6 +81,11 @@ type actionView struct {
 	// Full Constitutional Committee roster for this action (all seats; a seat
 	// with Voted=false is shown grayed as awaiting a vote).
 	Committee []CommitteeSeat
+
+	// The signed-in delegate's own internal position (drives the cast form).
+	You           string
+	YourVote      string
+	YourRationale string
 }
 
 // CommitteeSeat is one CC member's position on an action (or a pending seat).
@@ -196,9 +202,23 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	av.AbstractHTML = mdHTML(a.Abstract)
 
-	// Chamber deliberation (demo): how the body's delegates are leaning.
+	// Chamber deliberation: demo stances, overlaid with any real member votes.
 	av.BodyName = demoBody.Name
 	av.Deliberation = deliberate(a.ProposalID, demoBody.Members)
+	realVotes, _ := s.db.MemberVotesFor(a.ProposalID)
+	for i := range av.Deliberation {
+		if mv, ok := realVotes[av.Deliberation[i].Name]; ok && mv.Vote != "" {
+			av.Deliberation[i].Vote = mv.Vote
+			av.Deliberation[i].Rationale = mv.Rationale
+			av.Deliberation[i].Real = true
+		}
+	}
+	you := strings.TrimSuffix(func() string { m, _ := s.member(r); return m }(), " (demo)")
+	av.You = you
+	if mv, ok := realVotes[you]; ok {
+		av.YourVote, av.YourRationale = mv.Vote, mv.Rationale
+	}
+
 	for _, st := range av.Deliberation {
 		switch st.Vote {
 		case "Yes":
@@ -435,6 +455,13 @@ const detailHTML = `<!doctype html>
   .dname { color:var(--ivory); font-family:'Cinzel',serif; font-size:14px; font-weight:700; letter-spacing:.02em; }
   .drole { color:var(--muted); font-family:'EB Garamond',serif; font-size:12.5px; font-weight:400; letter-spacing:0; text-transform:none; margin-left:6px; }
   .drat { color:var(--body); font-size:14.5px; line-height:1.5; margin-top:3px; }
+  .realtag { color:var(--green); font-family:'Cinzel',serif; font-size:9px; letter-spacing:.08em; text-transform:uppercase; border:1px solid rgba(75,189,136,.5); border-radius:999px; padding:1px 7px; margin-left:8px; }
+  .castradios { display:flex; gap:10px; margin:6px 0 12px; flex-wrap:wrap; }
+  .cr { display:inline-flex; align-items:center; gap:7px; border:1px solid rgba(201,137,42,.3); border-radius:999px; padding:8px 16px; cursor:pointer; font-size:14px; color:var(--body); }
+  .cr input { accent-color:var(--gold); }
+  .cr:hover { border-color:rgba(245,210,122,.6); }
+  .castform textarea { width:100%; min-height:78px; background:var(--forum); border:1px solid rgba(201,137,42,.25); border-radius:10px; color:var(--body); font-family:'EB Garamond',Georgia,serif; font-size:15px; padding:11px 13px; resize:vertical; }
+  .cast-btn { margin-top:12px; font-family:'Cinzel',serif; font-size:12px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; color:var(--forum); background:linear-gradient(180deg,var(--goldb),var(--gold)); border:0; border-radius:10px; padding:11px 22px; cursor:pointer; }
   .submit-btn { display:inline-block; font-family:'Cinzel',serif; font-size:13px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; color:var(--forum); background:linear-gradient(180deg,var(--goldb),var(--gold)); text-decoration:none; border-radius:10px; padding:12px 22px; }
   .submit-btn:hover { filter:brightness(1.05); }
   footer { padding:20px 6vw; color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
@@ -479,13 +506,29 @@ const detailHTML = `<!doctype html>
       <div class="delib">
         <div class="dvote {{if eq .Vote "Yes"}}y{{else if eq .Vote "No"}}n{{else}}a{{end}}">{{.Vote}}</div>
         <div>
-          <div class="dname">{{.Member.Name}} <span class="drole">{{.Member.Role}}</span></div>
+          <div class="dname">{{.Member.Name}} <span class="drole">{{.Member.Role}}</span>{{if .Real}} <span class="realtag">recorded</span>{{end}}</div>
           <div class="drat">{{.Rationale}}</div>
         </div>
       </div>
       {{end}}
     </div>
   </div>
+
+  {{if .You}}
+  <div class="card" id="your-position">
+    <h2>Your position &middot; {{.You}}</h2>
+    <form method="post" action="/vote" class="castform">
+      <input type="hidden" name="slug" value="{{.Slug}}">
+      <div class="castradios">
+        <label class="cr"><input type="radio" name="vote" value="Yes" {{if eq .YourVote "Yes"}}checked{{end}}>Yes</label>
+        <label class="cr"><input type="radio" name="vote" value="No" {{if eq .YourVote "No"}}checked{{end}}>No</label>
+        <label class="cr"><input type="radio" name="vote" value="Abstain" {{if eq .YourVote "Abstain"}}checked{{end}}>Abstain</label>
+      </div>
+      <textarea name="rationale" placeholder="Your rationale (recorded for the body)…">{{.YourRationale}}</textarea>
+      <div><button type="submit" class="cast-btn">{{if .YourVote}}Update my position{{else}}Record my position{{end}}</button></div>
+    </form>
+  </div>
+  {{end}}
 
   <div style="margin:6px 0 2px;">
     <a class="submit-btn" href="/submit/{{.Slug}}">Submit committee vote on-chain &#8594;</a>

@@ -11,6 +11,7 @@ type MemberStance struct {
 	Member
 	Vote      string // Yes | No | Abstain
 	Rationale string
+	Real      bool // true once the member has actually cast (vs the demo stance)
 }
 
 var demoRationales = map[string][]string{

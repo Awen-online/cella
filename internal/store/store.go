@@ -48,6 +48,15 @@ CREATE TABLE IF NOT EXISTS reviews (
   model       TEXT,
   reviewed_at INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS member_votes (
+  proposal_id TEXT NOT NULL,
+  member      TEXT NOT NULL,    -- the delegate's identity (signed-in member)
+  vote        TEXT,             -- Yes | No | Abstain
+  rationale   TEXT,
+  updated_at  INTEGER,
+  PRIMARY KEY (proposal_id, member)
+);
 `
 
 // DB wraps the SQLite connection.
@@ -290,6 +299,44 @@ ON CONFLICT(proposal_id) DO UPDATE SET
   model=excluded.model, reviewed_at=excluded.reviewed_at`,
 		proposalID, verdict, summary, model, time.Now().Unix())
 	return err
+}
+
+// MemberVote is a body delegate's internal position on an action.
+type MemberVote struct {
+	Member    string
+	Vote      string
+	Rationale string
+}
+
+// UpsertMemberVote records (or replaces) a delegate's internal vote + rationale.
+func (d *DB) UpsertMemberVote(proposalID, member, vote, rationale string) error {
+	_, err := d.sql.Exec(`
+INSERT INTO member_votes (proposal_id, member, vote, rationale, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(proposal_id, member) DO UPDATE SET
+  vote=excluded.vote, rationale=excluded.rationale, updated_at=excluded.updated_at`,
+		proposalID, member, vote, rationale, time.Now().Unix())
+	return err
+}
+
+// MemberVotesFor returns delegates' internal votes for an action, keyed by member.
+func (d *DB) MemberVotesFor(proposalID string) (map[string]MemberVote, error) {
+	out := map[string]MemberVote{}
+	rows, err := d.sql.Query(`
+SELECT member, COALESCE(vote,''), COALESCE(rationale,'')
+FROM member_votes WHERE proposal_id = ?`, proposalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var m MemberVote
+		if err := rows.Scan(&m.Member, &m.Vote, &m.Rationale); err != nil {
+			return nil, err
+		}
+		out[m.Member] = m
+	}
+	return out, rows.Err()
 }
 
 // ReviewsFor returns reviews for the given proposal IDs, keyed by proposal_id.
