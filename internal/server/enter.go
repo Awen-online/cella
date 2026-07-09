@@ -99,16 +99,33 @@ const enterHTML = `<!doctype html>
   <footer>Cella · self-hostable Constitutional Committee governance · Apache-2.0</footer>
 
   <script>
-  // Real CIP-30 connect-and-sign is wired in the next pass; for now the button
-  // guides the presenter to the demo entry while wallet support lands.
-  document.getElementById('btn-wallet').addEventListener('click', function () {
+  // Real CIP-30 connect-and-sign: the wallet signs a server-issued challenge
+  // (CIP-8), the server verifies the Ed25519 signature. No funds move.
+  document.getElementById('btn-wallet').addEventListener('click', async function () {
     var msg = document.getElementById('wallet-msg');
-    var has = window.cardano && Object.keys(window.cardano).some(function (k) {
-      return window.cardano[k] && typeof window.cardano[k].enable === 'function';
-    });
-    msg.textContent = has
-      ? 'Wallet detected — sign-in is being wired up. For now, enter as a member below.'
-      : 'No Cardano wallet detected in this browser. Enter as a member below to continue.';
+    function fail(t){ msg.textContent = t + ' You can enter as a member below.'; }
+    try {
+      var names = Object.keys(window.cardano || {}).filter(function (k) {
+        return window.cardano[k] && typeof window.cardano[k].enable === 'function';
+      });
+      if (!names.length) { fail('No Cardano wallet found in this browser.'); return; }
+      msg.textContent = 'Connecting ' + (window.cardano[names[0]].name || names[0]) + '…';
+      var api = await window.cardano[names[0]].enable();
+      var used = await api.getUsedAddresses();
+      var addr = (used && used[0]) || (await api.getRewardAddresses())[0];
+      if (!addr) { fail('Could not read an address from the wallet.'); return; }
+      var ch = await (await fetch('/auth/challenge')).json();
+      msg.textContent = 'Awaiting your signature…';
+      var signed = await api.signData(addr, ch.challenge);
+      var res = await fetch('/auth/verify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: addr, signature: signed.signature, key: signed.key })
+      });
+      if (res.ok) { location.href = '/'; return; }
+      var e = await res.json(); fail('Sign-in failed (' + (e.error || 'unknown') + ').');
+    } catch (err) {
+      fail('Sign-in was cancelled or failed (' + ((err && err.message) || err) + ').');
+    }
   });
   </script>
 </body>

@@ -37,6 +37,8 @@ func New(db *store.DB) *Server {
 	s.mux.HandleFunc("/constitution", s.handleConstitution)
 	s.mux.HandleFunc("/enter", s.handleEnter)
 	s.mux.HandleFunc("/auth/member", s.handleMemberLogin)
+	s.mux.HandleFunc("/auth/challenge", s.handleChallenge)
+	s.mux.HandleFunc("/auth/verify", s.handleVerify)
 	s.mux.HandleFunc("/logout", s.handleLogout)
 	s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("ok"))
