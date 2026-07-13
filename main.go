@@ -64,6 +64,7 @@ usage:
 configuration (environment):
   CELLA_DB         path to the SQLite database   (default ./cella.db)
   CELLA_ADDR       web server listen address     (default :8080)
+  CELLA_SECRET     signs session cookies         (default: random key per start)
   KOIOS_URL        Koios API base URL            (default https://api.koios.rest/api/v1)
   KOIOS_TOKEN      optional Koios bearer token
   CELLA_LLM_URL    OpenAI-compatible endpoint    (e.g. http://localhost:11434/v1 for Ollama)
@@ -129,8 +130,12 @@ func runServe(cfg config.Config, args []string) error {
 	}
 	defer db.Close()
 
+	if cfg.Secret == "" {
+		log.Printf("warning: CELLA_SECRET is not set — using a random session key; sessions will not survive a restart")
+	}
+
 	log.Printf("cella %s serving on http://localhost%s", version, *addr)
-	return server.New(db).ListenAndServe(*addr)
+	return server.New(db, cfg.Secret).ListenAndServe(*addr)
 }
 
 func runReview(cfg config.Config, args []string) error {

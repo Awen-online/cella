@@ -1,19 +1,55 @@
 package server
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"net/http"
-	"net/url"
 	"strings"
 )
 
-// Session gating for the demo. The private chamber (actions, detail,
-// constitution) sits behind an entry splash; a visitor "enters" either by
-// signing with a real Cardano wallet (CIP-30, wired in a later pass) or, as a
-// demo fallback, by picking one of the body's members. The session is a simple
-// cookie holding the entering identity — sufficient for a demo, not a hardened
-// auth system.
+// Session handling. The private chamber (actions, detail, constitution) sits
+// behind an entry splash; a visitor "enters" either by signing with a real
+// Cardano wallet (CIP-30) or, as a demo fallback, by picking one of the body's
+// members.
+//
+// The session is a cookie carrying the entering identity, signed with an
+// HMAC-SHA256 key the server holds. The signature is what makes the identity
+// trustworthy: without it a visitor could simply set the cookie to any
+// delegate's name and vote as them. The cookie is readable but not forgeable.
 
 const sessionCookie = "cella_member"
+
+// csrfField is the form field carrying the anti-CSRF token on state-changing
+// posts. SameSite=Lax already blocks the cross-site form post, but it is a
+// browser-side control; the token is the server-side one.
+const csrfField = "csrf"
+
+// newKey returns the session-signing key: CELLA_SECRET when set, otherwise a
+// random key generated at startup. A random key is safe but ephemeral —
+// sessions do not survive a restart — so a persistent deployment should set
+// CELLA_SECRET.
+func newKey(secret string) []byte {
+	if secret != "" {
+		sum := sha256.Sum256([]byte(secret))
+		return sum[:]
+	}
+	k := make([]byte, 32)
+	if _, err := rand.Read(k); err != nil {
+		// crypto/rand failing is not a condition we can serve through: without a
+		// key we cannot sign sessions, and an unsigned session is a forgeable one.
+		panic("cella: cannot read random session key: " + err.Error())
+	}
+	return k
+}
+
+// sign returns the base64 HMAC of msg under the server key.
+func (s *Server) sign(msg string) string {
+	m := hmac.New(sha256.New, s.key)
+	m.Write([]byte(msg))
+	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+}
 
 // openPaths are reachable without a session (the splash, auth endpoints,
 // static/health). Everything else is gated.
@@ -24,29 +60,53 @@ func isOpenPath(p string) bool {
 	return strings.HasPrefix(p, "/auth/") || strings.HasPrefix(p, "/fonts/")
 }
 
-// member returns the identity in the current session, if any.
+// member returns the identity in the current session. The second result is
+// false when there is no cookie, or when its signature does not verify — a
+// tampered or unsigned cookie is treated as no session at all.
 func (s *Server) member(r *http.Request) (string, bool) {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil || c.Value == "" {
 		return "", false
 	}
-	v, err := url.QueryUnescape(c.Value)
+	name, sig, ok := strings.Cut(c.Value, ".")
+	if !ok {
+		return "", false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(name)
 	if err != nil {
 		return "", false
 	}
-	return v, true
+	identity := string(raw)
+	if !hmac.Equal([]byte(sig), []byte(s.sign(identity))) {
+		return "", false
+	}
+	return identity, true
 }
 
-// setMember writes the session cookie.
+// setMember writes the signed session cookie.
 func (s *Server) setMember(w http.ResponseWriter, identity string) {
+	name := base64.RawURLEncoding.EncodeToString([]byte(identity))
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
-		Value:    url.QueryEscape(identity),
+		Value:    name + "." + s.sign(identity),
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   12 * 60 * 60,
 	})
+}
+
+// csrfToken derives the anti-CSRF token for a session. It is bound to the
+// identity, so a token minted for one delegate cannot authorize a post as
+// another, and it needs no server-side storage.
+func (s *Server) csrfToken(identity string) string {
+	return s.sign("csrf\x00" + identity)
+}
+
+// checkCSRF reports whether the request carries the right token for identity.
+func (s *Server) checkCSRF(r *http.Request, identity string) bool {
+	got := r.FormValue(csrfField)
+	return got != "" && hmac.Equal([]byte(got), []byte(s.csrfToken(identity)))
 }
 
 // gate redirects unauthenticated visitors to the entry splash before serving

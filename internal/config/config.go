@@ -11,6 +11,11 @@ type Config struct {
 	KoiosURL   string // Koios API base URL
 	KoiosToken string // optional Koios bearer token
 
+	// Secret keys the session cookies. When empty a random key is generated at
+	// startup, which is secure but ephemeral: sessions do not survive a restart.
+	// Set it for any persistent deployment.
+	Secret string
+
 	// Constitutionality review — bring your own model. Any OpenAI-compatible
 	// endpoint (OpenAI, OpenRouter, Groq, vLLM, LM Studio, local Ollama).
 	LLMURL   string // e.g. https://api.openai.com/v1 or http://localhost:11434/v1
@@ -25,6 +30,7 @@ func Load() Config {
 		Addr:       env("CELLA_ADDR", ":8080"),
 		KoiosURL:   env("KOIOS_URL", "https://api.koios.rest/api/v1"),
 		KoiosToken: os.Getenv("KOIOS_TOKEN"),
+		Secret:     os.Getenv("CELLA_SECRET"),
 		LLMURL:     os.Getenv("CELLA_LLM_URL"),
 		LLMModel:   os.Getenv("CELLA_LLM_MODEL"),
 		LLMKey:     os.Getenv("CELLA_LLM_KEY"),

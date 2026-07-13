@@ -12,12 +12,16 @@ func (s *Server) handleCastVote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	member, ok := s.member(r)
+	sessionID, ok := s.member(r)
 	if !ok {
 		http.Redirect(w, r, "/enter", http.StatusFound)
 		return
 	}
-	member = strings.TrimSuffix(member, " (demo)")
+	if !s.checkCSRF(r, sessionID) {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	member := strings.TrimSuffix(sessionID, " (demo)")
 
 	slug := r.FormValue("slug")
 	vote := r.FormValue("vote")

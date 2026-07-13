@@ -15,6 +15,7 @@ import (
 // Server is Cella's HTTP server.
 type Server struct {
 	db   *store.DB
+	key  []byte // signs session cookies and CSRF tokens
 	mux  *http.ServeMux
 	tpl  *template.Template
 	dtpl *template.Template
@@ -23,10 +24,13 @@ type Server struct {
 	stpl *template.Template
 }
 
-// New builds a Server backed by db.
-func New(db *store.DB) *Server {
+// New builds a Server backed by db, signing sessions with secret. An empty
+// secret means a random key generated at startup — secure, but sessions do not
+// survive a restart.
+func New(db *store.DB, secret string) *Server {
 	s := &Server{
 		db:   db,
+		key:  newKey(secret),
 		mux:  http.NewServeMux(),
 		tpl:  template.Must(template.New("index").Funcs(funcs).Parse(withFonts(indexHTML))),
 		dtpl: template.Must(template.New("detail").Funcs(funcs).Parse(withFonts(detailHTML))),
@@ -90,6 +94,10 @@ type actionView struct {
 	YourVote      string
 	YourRationale string
 	YouRecorded   bool
+
+	// CSRF is the anti-forgery token for this session, embedded in every form
+	// that changes state.
+	CSRF string
 }
 
 // CommitteeSeat is one CC member's position on an action (or a pending seat).
@@ -229,8 +237,10 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 			av.Deliberation[i].Real = true
 		}
 	}
-	you := strings.TrimSuffix(func() string { m, _ := s.member(r); return m }(), " (demo)")
+	sessionID, _ := s.member(r)
+	you := strings.TrimSuffix(sessionID, " (demo)")
 	av.You = you
+	av.CSRF = s.csrfToken(sessionID)
 	for _, st := range av.Deliberation {
 		if st.Name == you {
 			av.YourVote, av.YourRationale = st.Vote, st.Rationale
@@ -553,6 +563,7 @@ const detailHTML = `<!doctype html>
     {{if .YouRecorded}}<div class="castnote">You have recorded this position. Update it any time before the committee submits.</div>{{else}}<div class="castnote">Showing your chamber stance for this action. Record it to confirm it as your position.</div>{{end}}
     <form method="post" action="/vote" class="castform">
       <input type="hidden" name="slug" value="{{.Slug}}">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div class="castradios">
         <label class="cr"><input type="radio" name="vote" value="Yes" {{if eq .YourVote "Yes"}}checked{{end}}>Yes</label>
         <label class="cr"><input type="radio" name="vote" value="No" {{if eq .YourVote "No"}}checked{{end}}>No</label>

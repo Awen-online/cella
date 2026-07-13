@@ -49,7 +49,7 @@ func seedServer(t *testing.T) (*Server, koios.GovernanceAction) {
 		t.Fatalf("seed review: %v", err)
 	}
 
-	return New(db), act
+	return New(db, "test-secret"), act
 }
 
 func get(t *testing.T, s *Server, path string) *httptest.ResponseRecorder {
