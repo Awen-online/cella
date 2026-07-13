@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"time"
@@ -105,6 +106,42 @@ func (d Deadline) Unix() int64 {
 		return 0
 	}
 	return d.At.Unix()
+}
+
+// byUrgency orders actions the way a committee needs to see them, which is not
+// the order they arrived in.
+//
+// What matters is what is about to run out. Live actions come first, soonest
+// deadline at the top; actions whose deadline we cannot resolve follow; and
+// expired ones sink to the bottom, since nothing can be done about them. Sorting
+// by ingest date — which is what the chain hands us — buries an action expiring
+// in two days under one that merely arrived yesterday.
+func byUrgency(a, b actionView) int {
+	rank := func(v actionView) int {
+		switch {
+		case v.Deadline.Known && !v.Deadline.Expired:
+			return 0 // live: act on these
+		case !v.Deadline.Known:
+			return 1 // unknowable: still possibly live
+		default:
+			return 2 // expired: nothing left to do
+		}
+	}
+	if ra, rb := rank(a), rank(b); ra != rb {
+		return ra - rb
+	}
+
+	switch {
+	case a.Deadline.Known && !a.Deadline.Expired:
+		// Both live — soonest first.
+		return cmp.Compare(a.Deadline.Left, b.Deadline.Left)
+	case a.Deadline.Expired && b.Deadline.Expired:
+		// Both expired — most recently expired first; older history sinks.
+		return cmp.Compare(b.Deadline.Left, a.Deadline.Left)
+	default:
+		// Neither has a usable clock — fall back to newest first.
+		return cmp.Compare(b.BlockTime, a.BlockTime)
+	}
 }
 
 func plural(n int, unit string) string {

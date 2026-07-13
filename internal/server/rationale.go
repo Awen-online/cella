@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Awen-online/cella/internal/constitution"
 	"github.com/Awen-online/cella/internal/rationale"
 	"github.com/Awen-online/cella/internal/store"
 )
@@ -113,12 +114,17 @@ func (s *Server) docFor(a store.ActionRow) (rationale.Doc, store.Rationale, erro
 			DidNotVote:       t.DidNotVote,
 		}
 	}
-	// Cite the revision of the Constitution the committee judged against, and
-	// the action itself, so the rationale is verifiable years from now.
+	// Cite what the committee actually judged against, and the action itself, so
+	// the rationale stays verifiable years from now — when "the Constitution"
+	// will mean a later revision than the one in force today.
+	_, ver, err := constitution.Text("")
+	if err != nil {
+		return rationale.Doc{}, r, err
+	}
 	body.References = []rationale.Reference{
 		{
 			Type:  "RelevantArticles",
-			Label: "Cardano Constitution (revision the committee judged against)",
+			Label: "Cardano Constitution " + ver.Label + " — the revision this committee judged against",
 			URI:   "https://github.com/IntersectMBO/cardano-constitution",
 		},
 		{

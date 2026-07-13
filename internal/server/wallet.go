@@ -113,7 +113,7 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.setMember(w, member.Name)
+	s.setMember(w, r, member.Name)
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "redirect": "/"})
 }
 

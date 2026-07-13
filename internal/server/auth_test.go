@@ -16,7 +16,7 @@ import (
 // session returns a signed cookie for identity, as the server would mint it.
 func session(s *Server, identity string) *http.Cookie {
 	rec := httptest.NewRecorder()
-	s.setMember(rec, identity)
+	s.setMember(rec, httptest.NewRequest(http.MethodGet, "/", nil), identity)
 	return rec.Result().Cookies()[0]
 }
 

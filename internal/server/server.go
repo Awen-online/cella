@@ -6,6 +6,7 @@ package server
 import (
 	"html/template"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -86,8 +87,11 @@ func New(db *store.DB, opts Options) *Server {
 func (s *Server) ListenAndServe(addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           s.gate(s.mux),
+		Handler:           secureHeaders(s.gate(s.mux)),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	return srv.ListenAndServe()
 }
@@ -220,6 +224,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		}
 		views = append(views, av)
 	}
+
+	// What is about to run out comes first. The chain hands actions to us newest
+	// first, which is not the order a committee needs them in.
+	slices.SortStableFunc(views, byUrgency)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tpl.Execute(w, idxView{Member: m, Actions: views}); err != nil {

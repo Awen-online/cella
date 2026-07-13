@@ -84,13 +84,19 @@ func (s *Server) member(r *http.Request) (string, bool) {
 }
 
 // setMember writes the signed session cookie.
-func (s *Server) setMember(w http.ResponseWriter, identity string) {
+//
+// Secure is set whenever the request arrived over HTTPS, so the session is
+// never sent back in the clear on a deployment that has TLS. It cannot simply
+// be set unconditionally: browsers drop Secure cookies on plain HTTP, and that
+// would lock everyone out of a local `cella serve` on localhost.
+func (s *Server) setMember(w http.ResponseWriter, r *http.Request, identity string) {
 	name := base64.RawURLEncoding.EncodeToString([]byte(identity))
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    name + "." + s.sign(identity),
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isTLS(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   12 * 60 * 60,
 	})
@@ -145,12 +151,23 @@ func (s *Server) handleMemberLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/enter", http.StatusFound)
 		return
 	}
-	s.setMember(w, found.Name+" (demo)")
+	s.setMember(w, r, found.Name+" (demo)")
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-// handleLogout clears the session and returns to the splash.
+// handleLogout clears the session and returns to the splash. The clearing
+// cookie carries the same attributes as the one it replaces — a browser will
+// not overwrite a Secure cookie with a non-Secure one, so an attribute mismatch
+// here would leave the session standing.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookie,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   isTLS(r),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
 	http.Redirect(w, r, "/enter", http.StatusFound)
 }

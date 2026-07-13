@@ -1,6 +1,7 @@
 package server
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -134,6 +135,55 @@ func TestCountdownPluralisation(t *testing.T) {
 		d := deadlineFor(648, mainnet, end.Add(-before))
 		if got := d.Countdown(); got != want {
 			t.Errorf("at %s from the deadline: Countdown() = %q, want %q", before, got, want)
+		}
+	}
+}
+
+// A committee needs to see what is about to run out, not what arrived most
+// recently. Sorting by ingest date — which is the order the chain hands actions
+// to us — buries an action expiring in two days under one that merely arrived
+// yesterday.
+func TestByUrgencyOrdersWhatMattersFirst(t *testing.T) {
+	now := mainnet.EpochStart(642)
+
+	mk := func(title string, epoch int64, blockTime int64) actionView {
+		av := actionView{}
+		av.Title = title
+		av.BlockTime = blockTime
+		if epoch > 0 {
+			av.Deadline = deadlineFor(epoch, mainnet, now)
+		}
+		return av
+	}
+
+	views := []actionView{
+		mk("expired long ago", 600, 100),
+		mk("newest, but plenty of time", 660, 999), // arrived last, least urgent
+		mk("no deadline known", 0, 500),
+		mk("expiring soonest", 643, 200), // arrived early, most urgent
+		mk("just expired", 641, 300),
+		mk("expiring second", 645, 400),
+	}
+	slices.SortStableFunc(views, byUrgency)
+
+	got := make([]string, len(views))
+	for i, v := range views {
+		got[i] = v.Title
+	}
+	want := []string{
+		// Live, soonest first — this is what the committee must act on.
+		"expiring soonest",
+		"expiring second",
+		"newest, but plenty of time",
+		// Then what we cannot resolve: possibly still live.
+		"no deadline known",
+		// Then history, most recently expired first.
+		"just expired",
+		"expired long ago",
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("position %d = %q, want %q\nfull order: %v", i, got[i], want[i], got)
 		}
 	}
 }
