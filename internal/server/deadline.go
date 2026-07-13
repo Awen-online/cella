@@ -31,15 +31,24 @@ type Deadline struct {
 }
 
 // deadlineFor computes the deadline for an action expiring at the given epoch.
-// The action remains votable *through* its expiration epoch, so the deadline is
-// the end of that epoch, not its start.
+//
+// Voting closes at the *start* of the expiration epoch, not the end of it. The
+// chain is unambiguous about this: for every expired action Koios reports,
+// expired_epoch equals expiration exactly — an action stating expiration 640 was
+// already marked expired during epoch 640. So the last moment it could be voted
+// on was the close of epoch 639, which is the instant epoch 640 begins.
+//
+// This is worth being pedantic about. Reading it as the *end* of the expiration
+// epoch — the intuitive reading, and the one Cella shipped with — hands a
+// committee an extra five days of runway that does not exist, on the one number
+// they cannot afford to be wrong about.
 func deadlineFor(epoch int64, p koios.GenesisParams, now time.Time) Deadline {
 	d := Deadline{Epoch: epoch}
 	if !p.Valid() {
 		return d
 	}
 	d.Known = true
-	d.At = p.EpochEnd(epoch)
+	d.At = p.EpochStart(epoch)
 	d.Left = d.At.Sub(now)
 	d.Expired = d.Left <= 0
 	return d
@@ -95,9 +104,9 @@ func (d Deadline) Countdown() string {
 // When is the deadline as a date, or the raw epoch when it cannot be resolved.
 func (d Deadline) When() string {
 	if !d.Known {
-		return fmt.Sprintf("end of epoch %d", d.Epoch)
+		return fmt.Sprintf("expires epoch %d", d.Epoch)
 	}
-	return fmt.Sprintf("end of epoch %d · %s", d.Epoch, d.At.Format("2 Jan 2006 15:04 MST"))
+	return fmt.Sprintf("expires epoch %d · %s", d.Epoch, d.At.Format("2 Jan 2006 15:04 MST"))
 }
 
 // Unix is the deadline as a unix timestamp, for the browser to tick against.

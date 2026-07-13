@@ -40,17 +40,29 @@ func TestEpochStartMatchesChain(t *testing.T) {
 	}
 }
 
-// An action remains votable *through* its expiration epoch, so the deadline is
-// the end of that epoch. Getting this off by one epoch would cost a committee
-// five days of runway in either direction.
-func TestDeadlineIsEndOfExpirationEpoch(t *testing.T) {
+// Voting closes at the START of the expiration epoch.
+//
+// The chain settles this: for every expired action Koios reports, expired_epoch
+// equals expiration exactly — an action with expiration 640 was already expired
+// during epoch 640, so its last votable moment was the close of epoch 639, which
+// is the instant epoch 640 begins.
+//
+// Cella originally read this as the *end* of the expiration epoch. That is the
+// intuitive reading and it is wrong, and it handed every committee an extra
+// epoch — five days on mainnet — of runway that did not exist. This test exists
+// to make sure it never comes back.
+func TestDeadlineIsStartOfExpirationEpoch(t *testing.T) {
 	d := deadlineFor(648, mainnet, mainnet.EpochStart(642))
 	if !d.Known {
 		t.Fatal("deadline should be known with valid genesis params")
 	}
-	if want := mainnet.EpochStart(649); !d.At.Equal(want) {
-		t.Errorf("deadline for epoch 648 = %s, want %s (the end of epoch 648)",
+	if want := mainnet.EpochStart(648); !d.At.Equal(want) {
+		t.Errorf("deadline for expiration epoch 648 = %s, want %s (the START of epoch 648)",
 			d.At.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+	// The end of epoch 648 is a full epoch too late — the old, wrong answer.
+	if d.At.Equal(mainnet.EpochEnd(648)) {
+		t.Error("deadline is the end of the expiration epoch: five days of runway that does not exist")
 	}
 }
 
@@ -72,7 +84,7 @@ func TestDeadlineUnknownWithoutGenesis(t *testing.T) {
 	if d.Unix() != 0 {
 		t.Errorf("Unix() = %d, want 0 so the browser does not tick a fictional clock", d.Unix())
 	}
-	if want := "end of epoch 648"; d.When() != want {
+	if want := "expires epoch 648"; d.When() != want {
 		t.Errorf("When() = %q, want %q", d.When(), want)
 	}
 	// It must never claim the action has expired just because it cannot tell.
@@ -82,8 +94,8 @@ func TestDeadlineUnknownWithoutGenesis(t *testing.T) {
 }
 
 func TestUrgencyAndCountdown(t *testing.T) {
-	// Deadline is the end of epoch 648.
-	end := mainnet.EpochEnd(648)
+	// Deadline is the start of epoch 648.
+	end := mainnet.EpochStart(648) // the real deadline
 
 	cases := []struct {
 		name        string
@@ -123,7 +135,7 @@ func TestUrgencyAndCountdown(t *testing.T) {
 // deadline is close, so a remaining day always reads as "26 hours left" rather
 // than rounding away the urgency.
 func TestCountdownPluralisation(t *testing.T) {
-	end := mainnet.EpochEnd(648)
+	end := mainnet.EpochStart(648) // the real deadline
 	cases := map[string]time.Duration{
 		"2 days left":       50 * time.Hour,
 		"26 hours left":     26 * time.Hour,
