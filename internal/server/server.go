@@ -62,11 +62,11 @@ func New(db *store.DB, opts Options) *Server {
 		mux:  http.NewServeMux(),
 		tpl:  template.Must(template.New("index").Funcs(funcs).Parse(withFonts(indexHTML))),
 		dtpl: template.Must(template.Must(template.Must(
-			template.New("detail").Funcs(funcs).Parse(withFonts(detailHTML))).
+			template.New("detail").Funcs(funcs).Parse(withWalletPicker(withFonts(detailHTML)))).
 			Parse(payloadHTML)).
 			Parse(votingContextHTML)),
 		ctpl: template.Must(template.New("constitution").Parse(withFonts(constHTML))),
-		etpl: template.Must(template.New("enter").Parse(withFonts(enterHTML))),
+		etpl: template.Must(template.New("enter").Parse(withWalletPicker(withFonts(enterHTML)))),
 		stpl: template.Must(template.New("submit").Parse(withFonts(submitHTML))),
 		rtpl: template.Must(template.New("rationale").Funcs(funcs).Parse(withFonts(rationaleHTML))),
 	}
@@ -1189,22 +1189,23 @@ const detailHTML = `<!doctype html>
     if (typeof e === 'string') return e;
     return e.info || e.message || String(e);
   }
-  function pickWallet() {
-    var keys = Object.keys(window.cardano || {}).filter(function (k) {
-      var w = window.cardano[k];
-      return w && typeof w.enable === 'function' && typeof w.icon !== 'undefined';
-    });
-    return keys.length ? keys[0] : null;
-  }
-
   form.addEventListener('submit', async function (e) {
     if (signed) return;            // already signed — let it through
     e.preventDefault();
 
     if (!chosen()) { msg.textContent = 'Choose Yes, No or Abstain first.'; return; }
 
-    var key = pickWallet();
-    if (!key) { msg.textContent = 'No Cardano wallet found in this browser. Install Eternl or Lace to sign your position.'; return; }
+    // Ask which wallet, rather than taking whichever the browser exposed first.
+    // The vote signature is checked against the key hash on the roster, so
+    // signing with the wrong wallet fails — and fails confusingly.
+    var key;
+    try {
+      key = await window.cellaWallet.pick('Sign your position with the wallet registered to you.');
+    } catch (err) {
+      if (err && err.message === 'cancelled') { msg.textContent = 'Signing cancelled. Your position was not recorded.'; }
+      else { msg.textContent = errText(err); }
+      return;
+    }
 
     btn.disabled = true;
     try {
