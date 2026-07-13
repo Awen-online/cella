@@ -92,6 +92,29 @@ CREATE TABLE IF NOT EXISTS committee (
   synced_at        INTEGER
 );
 
+-- Coordination flags: a delegate raising a hand to the rest of the chamber.
+-- One row per delegate per flag, so a delegate raising a concern cannot silently
+-- overwrite a colleague's — the chamber needs to see who is saying what, not
+-- just that somebody once said it.
+CREATE TABLE IF NOT EXISTS chamber_flags (
+  proposal_id TEXT NOT NULL,
+  member      TEXT NOT NULL,
+  flag        TEXT NOT NULL,   -- discuss | ready | blocked
+  raised_at   INTEGER,
+  PRIMARY KEY (proposal_id, member, flag)
+);
+
+-- A delegate's private working notes on an action. Nobody else can read them,
+-- and they are not a position: thinking out loud is not the same as taking a
+-- stand, and a delegate who cannot do the former in private will do less of it.
+CREATE TABLE IF NOT EXISTS drafts (
+  proposal_id TEXT NOT NULL,
+  member      TEXT NOT NULL,
+  body        TEXT,
+  updated_at  INTEGER,
+  PRIMARY KEY (proposal_id, member)
+);
+
 -- The committee's final, citable rationale for its vote — the body of the
 -- CIP-136 document that is anchored on-chain alongside the vote.
 CREATE TABLE IF NOT EXISTS rationales (
@@ -765,6 +788,119 @@ FROM committee ORDER BY status, cc_hot_id`)
 		c.Members = append(c.Members, m)
 	}
 	return c, rows.Err()
+}
+
+// Flag is one delegate raising a hand on an action.
+type Flag struct {
+	Member   string
+	Flag     string
+	RaisedAt int64
+}
+
+// ToggleFlag raises or lowers a delegate's flag, returning whether it is now
+// raised. A delegate can only toggle their own — lowering a colleague's flag
+// would silence a concern they meant the chamber to see.
+func (d *DB) ToggleFlag(proposalID, member, flag string) (bool, error) {
+	var exists int
+	err := d.sql.QueryRow(`
+SELECT COUNT(*) FROM chamber_flags WHERE proposal_id = ? AND member = ? AND flag = ?`,
+		proposalID, member, flag).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+
+	if exists > 0 {
+		_, err := d.sql.Exec(`
+DELETE FROM chamber_flags WHERE proposal_id = ? AND member = ? AND flag = ?`,
+			proposalID, member, flag)
+		return false, err
+	}
+	_, err = d.sql.Exec(`
+INSERT INTO chamber_flags (proposal_id, member, flag, raised_at) VALUES (?, ?, ?, ?)`,
+		proposalID, member, flag, time.Now().Unix())
+	return true, err
+}
+
+// FlagsFor returns every flag raised on an action, grouped by flag.
+func (d *DB) FlagsFor(proposalID string) (map[string][]Flag, error) {
+	out := map[string][]Flag{}
+	rows, err := d.sql.Query(`
+SELECT member, flag, COALESCE(raised_at,0) FROM chamber_flags
+WHERE proposal_id = ? ORDER BY raised_at`, proposalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var f Flag
+		if err := rows.Scan(&f.Member, &f.Flag, &f.RaisedAt); err != nil {
+			return nil, err
+		}
+		out[f.Flag] = append(out[f.Flag], f)
+	}
+	return out, rows.Err()
+}
+
+// FlagCountsFor returns how many flags of each kind are raised across many
+// actions, so the dashboard can show a chamber's outstanding concerns without a
+// query per row.
+func (d *DB) FlagCountsFor(ids []string) (map[string]map[string]int, error) {
+	out := map[string]map[string]int{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+
+	rows, err := d.sql.Query(`
+SELECT proposal_id, flag, COUNT(*) FROM chamber_flags
+WHERE proposal_id IN (`+placeholders+`) GROUP BY proposal_id, flag`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var pid, flag string
+		var n int
+		if err := rows.Scan(&pid, &flag, &n); err != nil {
+			return nil, err
+		}
+		if out[pid] == nil {
+			out[pid] = map[string]int{}
+		}
+		out[pid][flag] = n
+	}
+	return out, rows.Err()
+}
+
+// SaveDraft records a delegate's private working notes on an action.
+func (d *DB) SaveDraft(proposalID, member, body string) error {
+	_, err := d.sql.Exec(`
+INSERT INTO drafts (proposal_id, member, body, updated_at) VALUES (?, ?, ?, ?)
+ON CONFLICT(proposal_id, member) DO UPDATE SET
+  body=excluded.body, updated_at=excluded.updated_at`,
+		proposalID, member, body, time.Now().Unix())
+	return err
+}
+
+// Draft returns a delegate's private notes on an action. It is scoped to the
+// member by the query itself: there is no path by which one delegate's notes
+// can be read as another's.
+func (d *DB) Draft(proposalID, member string) (string, int64, error) {
+	var body string
+	var at int64
+	err := d.sql.QueryRow(`
+SELECT COALESCE(body,''), COALESCE(updated_at,0) FROM drafts
+WHERE proposal_id = ? AND member = ?`, proposalID, member).Scan(&body, &at)
+	if err == sql.ErrNoRows {
+		return "", 0, nil
+	}
+	return body, at, err
 }
 
 // Rationale is the committee's authored rationale for its vote on an action —

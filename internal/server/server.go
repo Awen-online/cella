@@ -79,6 +79,8 @@ func New(db *store.DB, opts Options) *Server {
 	s.mux.HandleFunc("/enter", s.handleEnter)
 	s.mux.HandleFunc("/vote", s.handleCastVote)
 	s.mux.HandleFunc("/vote/prepare", s.handleVotePrepare)
+	s.mux.HandleFunc("/flag", s.handleFlag)
+	s.mux.HandleFunc("/draft", s.handleDraft)
 	s.mux.HandleFunc("/auth/member", s.handleMemberLogin)
 	s.mux.HandleFunc("/auth/challenge", s.handleChallenge)
 	s.mux.HandleFunc("/auth/verify", s.handleVerify)
@@ -169,6 +171,12 @@ type actionView struct {
 	// YouCanSign is true when the signed-in delegate has a wallet registered in
 	// the roster, and so can sign their position rather than merely assert it.
 	YouCanSign bool
+
+	// Flags are the chamber's coordination flags — a delegate raising a hand to
+	// their colleagues. Draft is the signed-in delegate's own private notes,
+	// which nobody else can read.
+	Flags []FlagView
+	Draft string
 
 	// CSRF is the anti-forgery token for this session, embedded in every form
 	// that changes state.
@@ -353,6 +361,18 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if m, ok := s.body.ByName(you); ok && m.Address != "" {
 		av.YouCanSign = true
+	}
+
+	// The chamber's raised hands, and this delegate's own private notes.
+	av.Flags, err = s.flagViews(a.ProposalID, you)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	av.Draft, _, err = s.db.Draft(a.ProposalID, you)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	// A rationale can only be anchored once someone has written one.
@@ -820,6 +840,23 @@ const detailHTML = `<!doctype html>
   .drole { color:var(--muted); font-family:'EB Garamond',serif; font-size:12.5px; font-weight:400; letter-spacing:0; text-transform:none; margin-left:6px; }
   .drat { color:var(--body); font-size:14.5px; line-height:1.5; margin-top:3px; }
   .castnote { font-size:13.5px; color:var(--muted); margin:2px 0 12px; line-height:1.5; }
+  .fl-note, .dr-note { color:var(--muted); font-size:13.5px; line-height:1.55; margin-bottom:12px; }
+  .fl-row { display:flex; gap:10px; flex-wrap:wrap; }
+  .fl-form { margin:0; }
+  .fl { font-family:'Cinzel',serif; font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; font-weight:700; color:var(--muted); background:transparent; border:1px solid rgba(139,147,184,.35); border-radius:999px; padding:9px 18px; cursor:pointer; }
+  .fl:hover { border-color:var(--goldb); color:var(--goldb); }
+  .fl-n { font-family:'JetBrains Mono',monospace; font-size:10px; opacity:.8; margin-left:4px; }
+  .fl.up.fl-discuss { color:var(--goldb); border-color:rgba(245,210,122,.55); background:rgba(245,210,122,.08); }
+  .fl.up.fl-ready { color:var(--green); border-color:rgba(75,189,136,.55); background:rgba(75,189,136,.08); }
+  .fl.up.fl-blocked { color:var(--red); border-color:rgba(217,105,95,.55); background:rgba(217,105,95,.08); }
+  .fl.mine { box-shadow:inset 0 0 0 1px currentColor; }
+  .fl-who { color:var(--muted); font-size:13px; margin-top:10px; }
+  .fl-who b { color:var(--body); }
+  .draft { width:100%; min-height:120px; background:var(--forum); border:1px solid rgba(201,137,42,.25); border-radius:10px; color:var(--body); font-family:'EB Garamond',Georgia,serif; font-size:15px; line-height:1.55; padding:12px 14px; resize:vertical; }
+  .draft:focus { outline:none; border-color:rgba(245,210,122,.6); }
+  .dr-status { color:var(--muted); font-size:12px; margin-top:7px; min-height:1.1em; font-style:italic; }
+  .dr-use { display:inline-block; margin-top:10px; font-family:'Cinzel',serif; font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--goldb); text-decoration:none; border-bottom:1px dotted rgba(201,137,42,.5); }
+  .dr-use:hover { color:var(--gold); }
   .castradios { display:flex; gap:10px; margin:6px 0 12px; flex-wrap:wrap; }
   .cr { display:inline-flex; align-items:center; gap:7px; border:1px solid rgba(201,137,42,.3); border-radius:999px; padding:8px 16px; cursor:pointer; font-size:14px; color:var(--body); }
   .cr input { accent-color:var(--gold); }
@@ -924,6 +961,36 @@ const detailHTML = `<!doctype html>
 
   {{template "votingcontext" .}}
 
+  {{if .You}}
+  <div class="card" id="chamber">
+    <h2>Raise a hand</h2>
+    <div class="fl-note">A flag is addressed to your co-delegates. Each of you raises your own; nobody can lower yours but you.</div>
+    <div class="fl-row">
+      {{range .Flags}}
+      <form method="post" action="/flag" class="fl-form">
+        <input type="hidden" name="slug" value="{{$.Slug}}">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input type="hidden" name="flag" value="{{.Kind}}">
+        <button type="submit" class="fl fl-{{.Kind}} {{if .Mine}}mine{{end}} {{if .Raised}}up{{end}}">
+          {{.Label}}{{if .Raised}} <span class="fl-n">{{len .Members}}</span>{{end}}
+        </button>
+      </form>
+      {{end}}
+    </div>
+    {{range .Flags}}{{if .Raised}}
+    <div class="fl-who"><b>{{.Label}}:</b> {{range $i, $m := .Members}}{{if $i}}, {{end}}{{$m}}{{end}}</div>
+    {{end}}{{end}}
+  </div>
+
+  <div class="card">
+    <h2>Your private notes</h2>
+    <div class="dr-note">Only you can read these. They are not a position and they are never published &mdash; think out loud here, then record your position below when you are ready.</div>
+    <textarea id="draft" class="draft" placeholder="What you make of this action, so far…">{{.Draft}}</textarea>
+    <div class="dr-status" id="draft-status"></div>
+    <a class="dr-use" href="/rationale/{{.Slug}}">Take this into the committee's rationale &rarr;</a>
+  </div>
+  {{end}}
+
   <div class="card">
     <h2>Chamber deliberation — {{.BodyName}}</h2>
     <div class="chpos">Chamber position: <b>{{.ChamberPosition}}</b> &nbsp;·&nbsp; <span class="y">{{.Tally.Yes}} Yes</span> · <span class="n">{{.Tally.No}} No</span> · <span class="a">{{.Tally.Abstain}} Abstain</span> · <span class="a">{{.Tally.DidNotVote}} awaiting</span></div>
@@ -1015,6 +1082,39 @@ const detailHTML = `<!doctype html>
   </div>
 </main>
 <footer>Cella · built &amp; maintained by Awen LLC · Apache-2.0</footer>
+{{if .You}}
+<script>
+// Autosave the private notes. A delegate who has to remember to press save is a
+// delegate who will lose a paragraph of thinking to a closed tab.
+(function () {
+  var box = document.getElementById('draft'), status = document.getElementById('draft-status');
+  if (!box) return;
+  var timer = null, last = box.value;
+
+  function save() {
+    if (box.value === last) return;
+    var body = box.value;
+    status.textContent = 'Saving…';
+    fetch('/draft', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ slug: {{.Slug}}, csrf: {{.CSRF}}, body: body })
+    }).then(function (r) {
+      if (!r.ok) throw new Error(r.status);
+      last = body;
+      status.textContent = 'Saved ' + new Date().toLocaleTimeString();
+    }).catch(function () {
+      status.textContent = 'Could not save — your notes are still in the box.';
+    });
+  }
+
+  box.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(save, 800); });
+  // Do not lose the last few keystrokes to a closed tab.
+  window.addEventListener('beforeunload', save);
+  box.addEventListener('blur', save);
+})();
+</script>
+{{end}}
 {{if .YouCanSign}}
 <script>
 // Sign the position before recording it. The message is fetched from the server
