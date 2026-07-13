@@ -117,10 +117,22 @@ func TestHandleConstitution(t *testing.T) {
 		t.Fatalf("constitution status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"PREAMBLE", "Constitution revision", "v2.4"} {
+	for _, want := range []string{
+		"PREAMBLE",  // the text itself
+		"Revision",  // the version switcher
+		"v2.4",      // the current revision
+		"Contents",  // the table of contents
+		`id="q"`,    // the in-page search
+		"permalink", // an anchor on every article
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("constitution page missing %q", want)
 		}
+	}
+
+	// The articles the action page deep-links into must be anchored here.
+	if !strings.Contains(body, `id="article-iii-constitutional-committee"`) {
+		t.Error("Article III has no anchor; the action page's alignment links would be dead")
 	}
 
 	// An older revision renders too, and an unknown revision falls back to current.
@@ -129,6 +141,46 @@ func TestHandleConstitution(t *testing.T) {
 	}
 	if rec := get(t, s, "/constitution?v=bogus"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "PREAMBLE") {
 		t.Errorf("unknown revision did not fall back to current (code=%d)", rec.Code)
+	}
+}
+
+// A governance action points the committee at the articles that govern it. The
+// mapping is only useful if the anchors it names actually exist, and the whole
+// point is that the Constitution stops being a wall of text nobody cites.
+func TestAlignmentLinksIntoTheConstitution(t *testing.T) {
+	cases := map[string]string{
+		"TreasuryWithdrawals": "appendix-i-cardano-blockchain-guardrails",
+		"NewCommittee":        "article-iii-constitutional-committee",
+		"NoConfidence":        "article-iii-constitutional-committee",
+		"NewConstitution":     "article-iv-amendment-process",
+		"HardForkInitiation":  "article-i-cardano-blockchain-tenets-and-guardrails",
+		"InfoAction":          "article-ii-community-and-governance",
+	}
+	for typ, wantAnchor := range cases {
+		t.Run(typ, func(t *testing.T) {
+			a, ok := alignmentFor(typ)
+			if !ok {
+				t.Fatalf("no constitutional alignment for %s", typ)
+			}
+			if a.Lead == "" {
+				t.Error("the alignment says nothing about why these articles apply")
+			}
+			var found bool
+			for _, art := range a.Articles {
+				if art.ID == wantAnchor {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s does not point at #%s; got %v", typ, wantAnchor, a.Articles)
+			}
+		})
+	}
+
+	// An action type Cella has never seen must say nothing, rather than point the
+	// committee at an article that may have no bearing on it.
+	if _, ok := alignmentFor("SomeFutureAction"); ok {
+		t.Error("an unknown action type was given a constitutional alignment")
 	}
 }
 

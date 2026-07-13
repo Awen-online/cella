@@ -142,6 +142,11 @@ type actionView struct {
 	MotivationHTML        template.HTML
 	ProposerRationaleHTML template.HTML
 
+	// Alignment names the Constitution articles that most directly govern this
+	// kind of action, and links into them.
+	Alignment    Alignment
+	HasAlignment bool
+
 	// The Constitutional Committee as the chain seats it, and the threshold it
 	// must clear. YesNeeded is the quorum fraction of the authorized seats,
 	// rounded up — with 7 seats and a 2/3 quorum it is 5, not 4, and a committee
@@ -374,6 +379,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	av.Summary, av.HasSummary = a.Summary()
 	av.MotivationHTML = mdHTML(a.Motivation)
 	av.ProposerRationaleHTML = mdHTML(a.ProposerRationale)
+	av.Alignment, av.HasAlignment = alignmentFor(a.Type)
 
 	// The Constitutional Committee, as the chain currently seats it. Resigned
 	// members are excluded: their vote does not count, and counting them in the
@@ -769,6 +775,11 @@ const detailHTML = `<!doctype html>
   .pill.uncertain { color:var(--goldb); border-color:rgba(245,210,122,.5); }
   .rsum { font-size:15px; color:var(--body); margin-top:8px; line-height:1.5; }
   .rmodel { color:var(--muted); font-size:12px; margin-top:6px; font-style:italic; }
+  .al-lead { font-size:15px; line-height:1.55; color:var(--body); }
+  .al-arts { display:flex; flex-wrap:wrap; gap:9px; margin-top:12px; }
+  .al-art { font-family:'Cinzel',serif; font-size:12px; letter-spacing:.04em; color:var(--goldb); text-decoration:none; border:1px solid rgba(245,210,122,.4); border-radius:999px; padding:6px 14px; }
+  .al-art:hover { background:rgba(245,210,122,.1); }
+  .al-note { color:var(--muted); font-size:12.5px; font-style:italic; margin-top:12px; line-height:1.5; }
   .tally { font-size:15px; margin-bottom:10px; }
   .tally .y { color:var(--green); } .tally .n { color:var(--red); } .tally .a { color:var(--muted); }
   table.votes { width:100%; border-collapse:collapse; }
@@ -864,6 +875,17 @@ const detailHTML = `<!doctype html>
   </div>
 
   {{template "payload" .}}
+
+  {{if .HasAlignment}}
+  <div class="card">
+    <h2>Constitutional alignment</h2>
+    <div class="al-lead">{{.Alignment.Lead}}</div>
+    <div class="al-arts">
+      {{range .Alignment.Articles}}<a class="al-art" href="/constitution?focus={{.ID}}#{{.ID}}">{{.Title}} &rarr;</a>{{end}}
+    </div>
+    <div class="al-note">A starting point for reading, not a boundary on it. The committee judges the action against the whole Constitution &mdash; including the article Cella did not think to name.</div>
+  </div>
+  {{end}}
 
   {{if .HasReview}}
   <div class="card">
