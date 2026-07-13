@@ -107,11 +107,15 @@ const submitHTML = `<!doctype html>
   :root { --forum:#0A0E27; --veil:#131A40; --ivory:#FAF7EE; --body:#d7ddef; --muted:#8b93b8; --gold:#C9892A; --goldb:#F5D27A; --goldd:#7A5418; --blue:#6f93ff; --green:#4bbd88; --red:#d9695f; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--forum); color:var(--body); font-family:'EB Garamond',Georgia,serif; }
-  header { padding:30px 6vw 16px; border-bottom:1px solid rgba(201,137,42,.25); }
+  /* One centred column, so the page uses the desktop it is given instead of
+     hugging the left edge. Borders stay full-bleed; only the content centres. */
+  header { border-bottom:1px solid rgba(201,137,42,.25); }
+  header .hin { max-width:1100px; margin:0 auto; padding:30px 40px 16px; }
+  footer .fin { max-width:1100px; margin:0 auto; padding:20px 40px; }
   header .name { font-family:'Cinzel',serif; font-weight:800; letter-spacing:.06em; color:var(--ivory); font-size:22px; }
   header .name b { color:var(--gold); }
   header a.back { color:var(--blue); text-decoration:none; font-size:14px; }
-  main { padding:22px 6vw 70px; max-width:820px; }
+  main { padding:22px 40px 70px; max-width:1100px; margin:0 auto; width:100%; }
   h1 { font-family:'Cinzel',serif; color:var(--ivory); font-weight:700; font-size:22px; letter-spacing:.03em; margin:6px 0 6px; }
   .sub { color:var(--muted); font-size:14px; margin-bottom:6px; }
   .decision { margin:16px 0 6px; font-size:16px; }
@@ -121,7 +125,8 @@ const submitHTML = `<!doctype html>
   .decision .pill.Abstain { color:var(--muted); border-color:rgba(139,147,184,.4); }
   .demo-banner { margin:14px 0 20px; padding:10px 14px; border:1px dashed rgba(245,210,122,.5); border-radius:10px; color:var(--goldb); font-size:13.5px; }
   .steps { display:flex; flex-direction:column; gap:12px; margin-top:8px; }
-  .st { display:grid; grid-template-columns:34px 1fr; gap:14px; align-items:start; background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:14px 16px; opacity:.55; transition:opacity .3s; }
+  .st { display:grid; grid-template-columns:34px minmax(0,1fr); gap:14px; align-items:start; background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:14px 16px; opacity:.55; transition:opacity .3s; }
+  .st > * { min-width:0; }
   .st.active { opacity:1; border-color:rgba(245,210,122,.4); }
   .st.done { opacity:1; }
   .st .dot { width:26px; height:26px; border-radius:50%; border:1.5px solid var(--gold); color:var(--gold); font-family:'Cinzel',serif; font-size:12px; display:flex; align-items:center; justify-content:center; }
@@ -153,13 +158,15 @@ const submitHTML = `<!doctype html>
   .result h3 { font-family:'Cinzel',serif; color:var(--green); margin:0 0 8px; font-size:15px; }
   .result .tx { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--goldb); word-break:break-all; }
   .result .note { color:var(--muted); font-size:12.5px; margin-top:8px; font-style:italic; }
-  footer { padding:20px 6vw; color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
+  footer { color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
 </style>
 </head>
 <body>
 <header>
-  <div class="name">CE<b>LL</b>A</div>
-  <a class="back" href="/action/{{.Slug}}">← Back to the action</a>
+  <div class="hin">
+    <div class="name">CE<b>LL</b>A</div>
+    <a class="back" href="/action/{{.Slug}}">← Back to the action</a>
+  </div>
 </header>
 <main>
   <div class="sub">Submit the committee's vote on-chain</div>
@@ -253,7 +260,7 @@ const submitHTML = `<!doctype html>
     <div class="note">Nothing was broadcast to the network. In a live instance this is where the fully-witnessed transaction goes on-chain.</div>
   </div>
 </main>
-<footer>Cella · mock on-chain submission · no transaction is broadcast · Apache-2.0</footer>
+<footer><div class="fin">Cella · on-chain submission · the rationale and its anchor hash are real; the transaction is not broadcast · Apache-2.0</div></footer>
 
 <script>
 (function () {

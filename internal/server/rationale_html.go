@@ -13,14 +13,17 @@ const rationaleHTML = `<!doctype html>
   :root { --forum:#0A0E27; --veil:#131A40; --ivory:#FAF7EE; --body:#d7ddef; --muted:#8b93b8; --gold:#C9892A; --goldb:#F5D27A; --blue:#6f93ff; --green:#4bbd88; --red:#d9695f; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--forum); color:var(--body); font-family:'EB Garamond',Georgia,serif; }
-  header { padding:30px 6vw 16px; border-bottom:1px solid rgba(201,137,42,.25); }
+  /* One centred column, so the page uses the desktop it is given. */
+  header { border-bottom:1px solid rgba(201,137,42,.25); }
+  header .hin { max-width:1100px; margin:0 auto; padding:30px 40px 16px; }
+  footer .fin { max-width:1100px; margin:0 auto; padding:20px 40px; }
   header .name { font-family:'Cinzel',serif; font-weight:800; letter-spacing:.06em; color:var(--ivory); font-size:22px; }
   header .name b { color:var(--gold); }
   header a.back { color:var(--blue); text-decoration:none; font-size:14px; }
-  main { padding:22px 6vw 70px; max-width:900px; }
+  main { padding:22px 40px 70px; max-width:1100px; margin:0 auto; width:100%; }
   h1 { font-family:'Cinzel',serif; color:var(--ivory); font-weight:700; font-size:22px; letter-spacing:.03em; margin:6px 0 6px; line-height:1.3; }
   .sub { color:var(--muted); font-size:14px; }
-  .card { background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:18px 20px; margin-top:20px; }
+  .card { background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:18px 20px; margin-top:20px; min-width:0; overflow-wrap:anywhere; }
   .card h2 { font-family:'Cinzel',serif; color:var(--gold); font-size:13px; letter-spacing:.12em; text-transform:uppercase; margin:0 0 12px; }
   .split { display:flex; align-items:center; gap:14px; flex-wrap:wrap; font-size:15px; }
   .split .y { color:var(--green); } .split .n { color:var(--red); } .split .a { color:var(--muted); } .split .dn { color:var(--muted); font-style:italic; }
@@ -49,13 +52,15 @@ const rationaleHTML = `<!doctype html>
   .dl.off { background:none; border:1px solid rgba(139,147,184,.35); color:var(--muted); cursor:not-allowed; }
   .authors { color:var(--body); font-size:14.5px; line-height:1.6; }
   .authors .none { color:var(--muted); font-style:italic; }
-  footer { padding:20px 6vw; color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
+  footer { color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
 </style>
 </head>
 <body>
 <header>
-  <div class="name">CE<b>LL</b>A</div>
-  <a class="back" href="/action/{{.Slug}}">← Back to the action</a>
+  <div class="hin">
+    <div class="name">CE<b>LL</b>A</div>
+    <a class="back" href="/action/{{.Slug}}">← Back to the action</a>
+  </div>
 </header>
 <main>
   <div class="sub">The committee's rationale</div>
@@ -144,7 +149,7 @@ const rationaleHTML = `<!doctype html>
     </div>
   </div>
 </main>
-<footer>Cella · CIP-136 committee vote rationale · Apache-2.0</footer>
+<footer><div class="fin">Cella · CIP-136 committee vote rationale · Apache-2.0</div></footer>
 
 <script>
 (function () {

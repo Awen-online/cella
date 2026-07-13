@@ -507,7 +507,9 @@ const indexHTML = `<!doctype html>
   :root { --forum:#0A0E27; --veil:#131A40; --ivory:#FAF7EE; --body:#cfd6ec; --muted:#8b93b8; --gold:#C9892A; --goldb:#F5D27A; --blue:#6f93ff; --green:#4bbd88; --red:#d9695f; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--forum); color:var(--body); font-family:'EB Garamond',Georgia,serif; }
-  header { padding:34px 6vw 18px; border-bottom:1px solid rgba(201,137,42,.25); }
+  header { border-bottom:1px solid rgba(201,137,42,.25); }
+  header .hin { max-width:1500px; margin:0 auto; padding:34px 40px 18px; }
+  footer .fin { max-width:1500px; margin:0 auto; padding:20px 40px; }
   header .name { font-family:'Cinzel',serif; font-weight:800; letter-spacing:.06em; color:var(--ivory); font-size:30px; }
   header .name b { color:var(--gold); }
   header .topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; }
@@ -520,7 +522,7 @@ const indexHTML = `<!doctype html>
   header .tag { color:var(--muted); font-size:15px; margin-top:4px; }
   header a.nav { display:inline-block; margin-top:10px; color:var(--goldb); text-decoration:none; font-family:'Cinzel',serif; font-size:12px; letter-spacing:.1em; text-transform:uppercase; border:1px solid rgba(245,210,122,.4); border-radius:999px; padding:4px 14px; }
   header a.nav:hover { background:rgba(245,210,122,.12); }
-  main { padding:24px 6vw 60px; }
+  main { padding:24px 40px 60px; max-width:1500px; margin:0 auto; }
   h2 { font-family:'Cinzel',serif; color:var(--ivory); font-weight:700; font-size:20px; letter-spacing:.04em; }
   table { width:100%; border-collapse:collapse; margin-top:14px; }
   th,td { text-align:left; padding:11px 12px; border-bottom:1px solid rgba(201,137,42,.15); vertical-align:top; }
@@ -569,11 +571,12 @@ const indexHTML = `<!doctype html>
   .legend { color:var(--muted); font-size:15px; margin-top:8px; font-style:italic; }
   .empty { margin-top:20px; padding:22px; border:1px dashed rgba(201,137,42,.35); border-radius:12px; color:var(--muted); }
   .empty code { color:var(--goldb); }
-  footer { padding:20px 6vw; color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
+  footer { color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
 </style>
 </head>
 <body>
 <header>
+  <div class="hin">
   <div class="topbar">
     <div class="brand">
       <svg class="badge" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Cella"><rect width="100" height="100" rx="22" fill="#0A0E27"></rect><g transform="translate(18,16) scale(0.64)"><path d="M22 86 L22 42 A28 28 0 0 1 78 42 L78 86" fill="none" stroke="#FAF7EE" stroke-width="9"></path><rect x="11" y="84" width="78" height="9" rx="1.5" fill="#FAF7EE"></rect><circle cx="50" cy="62" r="6.5" fill="#F5D27A"></circle></g></svg>
@@ -583,6 +586,7 @@ const indexHTML = `<!doctype html>
   </div>
   <div class="tag">Self-hostable Cardano Constitutional Committee governance</div>
   <a class="nav" href="/constitution">Read the Constitution →</a>
+  </div>
 </header>
 <main>
   <h2>Governance actions &amp; Constitutional Committee votes</h2>
@@ -650,7 +654,7 @@ const indexHTML = `<!doctype html>
   <div class="empty">No governance actions yet. Run <code>cella ingest</code> to pull actions and CC votes from Koios.</div>
   {{end}}
 </main>
-<footer>Cella · built &amp; maintained by Awen LLC · Apache-2.0</footer>
+<footer><div class="fin">Cella · built &amp; maintained by Awen LLC · Apache-2.0</div></footer>
 <script>
 // Tick the countdowns so a page left open does not quietly go stale — a stale
 // clock on a governance deadline is worse than no clock.
@@ -693,11 +697,15 @@ const detailHTML = `<!doctype html>
   :root { --forum:#0A0E27; --veil:#131A40; --ivory:#FAF7EE; --body:#cfd6ec; --muted:#8b93b8; --gold:#C9892A; --goldb:#F5D27A; --blue:#6f93ff; --green:#4bbd88; --red:#d9695f; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--forum); color:var(--body); font-family:'EB Garamond',Georgia,serif; }
-  header { padding:34px 6vw 18px; border-bottom:1px solid rgba(201,137,42,.25); }
+  /* One centred column, so the page uses the desktop it is given instead of
+     hugging the left edge. Borders stay full-bleed; only the content centres. */
+  header { border-bottom:1px solid rgba(201,137,42,.25); }
+  header .hin { max-width:1100px; margin:0 auto; padding:34px 40px 18px; }
+  footer .fin { max-width:1100px; margin:0 auto; padding:20px 40px; }
   header .name { font-family:'Cinzel',serif; font-weight:800; letter-spacing:.06em; color:var(--ivory); font-size:24px; }
   header .name b { color:var(--gold); }
   header a.back { color:var(--blue); text-decoration:none; font-size:15.5px; }
-  main { padding:24px 6vw 60px; max-width:900px; }
+  main { padding:24px 40px 60px; max-width:1100px; margin:0 auto; width:100%; }
   h1 { font-family:'Cinzel',serif; color:var(--ivory); font-weight:700; font-size:24px; letter-spacing:.02em; line-height:1.25; margin:6px 0 4px; }
   .type { color:var(--goldb); font-size:13px; text-transform:uppercase; letter-spacing:.08em; font-family:'Cinzel',serif; }
   .meta { color:var(--muted); font-size:15px; margin-top:8px; line-height:1.65; }
@@ -735,7 +743,8 @@ const detailHTML = `<!doctype html>
   .pl-total { color:var(--goldb); font-size:19px; font-family:'Cinzel',serif; letter-spacing:.02em; }
   .pl-sub { font-family:'Cinzel',serif; color:var(--gold); font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin:14px 0 7px; }
   .pl-rows { display:flex; flex-direction:column; gap:9px; }
-  .pl-row { display:grid; grid-template-columns:130px 1fr 54px; gap:10px; align-items:center; }
+  .pl-row { display:grid; grid-template-columns:130px minmax(0,1fr) 54px; gap:10px; align-items:center; }
+  .pl-row > * { min-width:0; }
   .pl-amt { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:13px; color:var(--goldb); text-align:right; }
   .pl-barwrap { height:9px; background:rgba(139,147,184,.14); border-radius:999px; overflow:hidden; }
   .pl-bar { height:100%; background:linear-gradient(90deg,var(--gold),var(--goldb)); border-radius:999px; }
@@ -779,7 +788,7 @@ const detailHTML = `<!doctype html>
   .pcase summary { cursor:pointer; font-family:'Cinzel',serif; color:var(--goldb); font-size:12px; letter-spacing:.05em; padding:6px 0; }
   .pcase summary:hover { color:var(--gold); }
   .meta a { color:var(--blue); text-decoration:none; }
-  .card { background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:18px 20px; margin-top:20px; }
+  .card { background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:18px 20px; margin-top:20px; min-width:0; overflow-wrap:anywhere; }
   .card h2 { font-family:'Cinzel',serif; color:var(--gold); font-size:13px; letter-spacing:.12em; text-transform:uppercase; margin:0 0 10px; }
   .abstract { color:var(--body); font-size:15.5px; line-height:1.6; }
   .abstract p { margin:0 0 10px; }
@@ -802,7 +811,7 @@ const detailHTML = `<!doctype html>
   .al-note { color:var(--muted); font-size:12.5px; font-style:italic; margin-top:12px; line-height:1.5; }
   .tally { font-size:15px; margin-bottom:10px; }
   .tally .y { color:var(--green); } .tally .n { color:var(--red); } .tally .a { color:var(--muted); }
-  table.votes { width:100%; border-collapse:collapse; }
+  table.votes { width:100%; border-collapse:collapse; table-layout:fixed; }
   table.votes th,table.votes td { text-align:left; padding:9px 10px; border-bottom:1px solid rgba(201,137,42,.12); font-size:13px; vertical-align:top; }
   table.votes th { font-family:'Cinzel',serif; color:var(--gold); font-size:11px; letter-spacing:.1em; text-transform:uppercase; }
   table.votes td.vote b.y { color:var(--green); } table.votes td.vote b.n { color:var(--red); } table.votes td.vote b.a { color:var(--muted); }
@@ -833,7 +842,8 @@ const detailHTML = `<!doctype html>
   .signbox b { color:var(--goldb); }
   #vote-msg { color:var(--goldb); font-size:13px; margin-top:9px; min-height:1.2em; }
   .delib-list { display:flex; flex-direction:column; gap:14px; }
-  .delib { display:grid; grid-template-columns:76px 1fr; gap:13px; align-items:start; }
+  .delib { display:grid; grid-template-columns:76px minmax(0,1fr); gap:13px; align-items:start; }
+  .delib > * { min-width:0; }
   .dvote { font-family:'Cinzel',serif; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; text-align:center; padding:6px 0; border-radius:8px; border:1px solid; }
   .dvote.y { color:var(--green); border-color:rgba(75,189,136,.5); } .dvote.n { color:var(--red); border-color:rgba(217,105,95,.5); } .dvote.a { color:var(--muted); border-color:rgba(139,147,184,.4); }
   .dname { color:var(--ivory); font-family:'Cinzel',serif; font-size:14px; font-weight:700; letter-spacing:.02em; }
@@ -868,13 +878,15 @@ const detailHTML = `<!doctype html>
   .submit-btn:hover { filter:brightness(1.05); }
   .rat-btn { display:inline-block; font-family:'Cinzel',serif; font-size:13px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; color:var(--goldb); border:1px solid rgba(245,210,122,.45); text-decoration:none; border-radius:10px; padding:12px 22px; }
   .rat-btn:hover { background:rgba(245,210,122,.1); }
-  footer { padding:20px 6vw; color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
+  footer { color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
 </style>
 </head>
 <body>
 <header>
-  <div class="name">CE<b>LL</b>A</div>
-  <a class="back" href="/">← All governance actions</a> &nbsp;·&nbsp; <a class="back" href="/constitution">Constitution</a>
+  <div class="hin">
+    <div class="name">CE<b>LL</b>A</div>
+    <a class="back" href="/">← All governance actions</a> &nbsp;·&nbsp; <a class="back" href="/constitution">Constitution</a>
+  </div>
 </header>
 <main>
   <div class="type">{{.Type}}</div>
@@ -1081,7 +1093,7 @@ const detailHTML = `<!doctype html>
     </table>
   </div>
 </main>
-<footer>Cella · built &amp; maintained by Awen LLC · Apache-2.0</footer>
+<footer><div class="fin">Cella · built &amp; maintained by Awen LLC · Apache-2.0</div></footer>
 {{if .You}}
 <script>
 // Autosave the private notes. A delegate who has to remember to press save is a
