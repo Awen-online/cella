@@ -4,21 +4,34 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Awen-online/cella/internal/rationale"
 	"github.com/Awen-online/cella/internal/store"
 )
 
-// submitView drives the (mock) on-chain submission wizard for one action.
+// submitView drives the on-chain submission flow for one action.
 type submitView struct {
 	store.ActionRow
 	Decision string   // Yes | No | Abstain — the committee's resolved vote
+	Tally    tally    // how the delegates split to get there
 	Members  []Member // CC cold-key co-signers (the body's delegates)
+
+	// The rationale that is anchored with the vote. AnchorHash is real: it is
+	// the blake2b-256 of the exact bytes served at /rationale/{slug}.jsonld, and
+	// the value `cardano-cli hash anchor-data --file-text` prints for that file.
+	// Ready is false when no anchorable rationale has been authored yet, in
+	// which case there is nothing to submit.
+	Ready      bool
+	Problem    string
+	AnchorHash string
 }
 
-// handleSubmit renders the mock on-chain submission flow: anchor the rationale,
+// handleSubmit renders the on-chain submission flow: anchor the rationale,
 // compose the committee vote, build the transaction, collect the CC cold-key
-// signatures, and submit. It is a DEMO — nothing is broadcast. Modelled on the
-// credential-manager / hot-NFT multisig runbook (orchestrator-cli + cardano-cli
-// conway).
+// signatures, and submit. Modelled on the credential-manager / hot-NFT multisig
+// runbook (orchestrator-cli + cardano-cli conway).
+//
+// The rationale and its anchor hash are real artifacts. The transaction is not:
+// nothing is broadcast, because that requires the committee's cold keys.
 func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	slug := strings.TrimPrefix(r.URL.Path, "/submit/")
 	if slug == "" {
@@ -35,27 +48,40 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	del := deliberate(a.ProposalID, demoBody.Members)
-	y, n, ab := 0, 0, 0
-	for _, st := range del {
-		switch st.Vote {
-		case "Yes":
-			y++
-		case "No":
-			n++
-		default:
-			ab++
-		}
+	t, _, err := s.tallyFor(a.ProposalID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	decision := "Abstain"
-	if y > n && y >= ab {
-		decision = "Yes"
-	} else if n > y && n >= ab {
-		decision = "No"
+
+	v := submitView{
+		ActionRow: a,
+		Decision:  t.Decision(),
+		Tally:     t,
+		Members:   demoBody.Members,
+	}
+
+	// A committee submits its reasoning with its vote. Without an anchorable
+	// rationale there is no anchor hash, and so nothing to compose a vote around.
+	doc, _, err := s.docFor(a)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := doc.Validate(); err != nil {
+		v.Problem = err.Error()
+	} else {
+		jsonld, err := doc.JSONLD()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		v.AnchorHash = rationale.AnchorHash(jsonld)
+		v.Ready = true
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.stpl.Execute(w, submitView{ActionRow: a, Decision: decision, Members: demoBody.Members}); err != nil {
+	if err := s.stpl.Execute(w, v); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -96,6 +122,14 @@ const submitHTML = `<!doctype html>
   .signers { display:flex; flex-wrap:wrap; gap:8px; margin-top:9px; }
   .signer { font-size:12px; border:1px solid rgba(201,137,42,.3); border-radius:999px; padding:3px 11px; color:var(--muted); }
   .signer.signed { color:var(--green); border-color:rgba(75,189,136,.5); }
+  .decision .split { color:var(--muted); font-size:13.5px; margin-left:8px; }
+  .decision .split .y { color:var(--green); } .decision .split .n { color:var(--red); } .decision .split .a { color:var(--muted); }
+  .hashline { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11.5px; color:var(--green); margin-top:6px; word-break:break-all; }
+  .rlink { color:var(--blue); text-decoration:none; font-size:13px; }
+  .muted { color:var(--muted); font-style:italic; }
+  .blocked { margin:16px 0 20px; padding:16px 18px; border:1px solid rgba(217,105,95,.4); border-radius:12px; background:rgba(217,105,95,.07); }
+  .blocked h3 { font-family:'Cinzel',serif; color:var(--red); margin:0 0 8px; font-size:15px; }
+  .blocked .go-link { display:inline-block; margin-top:12px; font-family:'Cinzel',serif; font-size:12px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; color:var(--goldb); text-decoration:none; border:1px solid rgba(245,210,122,.45); border-radius:10px; padding:9px 18px; }
   .actions { margin-top:26px; }
   .go { font-family:'Cinzel',serif; font-size:14px; letter-spacing:.1em; text-transform:uppercase; font-weight:700; color:var(--forum); background:linear-gradient(180deg,var(--goldb),var(--gold)); border:0; border-radius:12px; padding:15px 30px; cursor:pointer; }
   .go:disabled { opacity:.6; cursor:default; }
@@ -114,16 +148,32 @@ const submitHTML = `<!doctype html>
 <main>
   <div class="sub">Submit the committee's vote on-chain</div>
   <h1>{{if .Title}}{{.Title}}{{else}}Governance action{{end}}</h1>
-  <div class="decision">Committee decision from the chamber: <span class="pill {{.Decision}}">{{.Decision}}</span></div>
-  <div class="demo-banner"><b>Demo mock-up.</b> This walks the real credential-manager / hot-NFT multisig flow but does <b>not</b> broadcast a transaction. Live submission requires the CC cold keys.</div>
+  <div class="decision">Committee decision from the chamber: <span class="pill {{.Decision}}">{{.Decision}}</span>
+    <span class="split">from <span class="y">{{.Tally.Yes}} Yes</span> · <span class="n">{{.Tally.No}} No</span> · <span class="a">{{.Tally.Abstain}} Abstain</span>{{if .Tally.DidNotVote}} · {{.Tally.DidNotVote}} awaiting{{end}}</span>
+  </div>
+  <div class="demo-banner"><b>The rationale and its anchor hash below are real</b> — the same bytes and the same hash a committee would anchor. The transaction is not: this walks the credential-manager / hot-NFT multisig flow without broadcasting, because that requires the CC cold keys.</div>
+
+  {{if not .Ready}}
+  <div class="blocked">
+    <h3>Nothing to submit yet</h3>
+    <div>The committee votes with its reasoning attached, and this action has no anchorable rationale — {{.Problem}}.</div>
+    <a class="go-link" href="/rationale/{{.Slug}}">Author the committee rationale &#8594;</a>
+  </div>
+  {{end}}
 
   <div class="steps" id="steps">
     <div class="st" data-i="0">
       <div class="dot">1</div>
       <div>
         <div class="t">Anchor the rationale (CIP-136)</div>
-        <div class="d">Publish the committee's rationale to IPFS and hash the anchor.</div>
-        <div class="cmd">cardano-cli hash anchor-data --file-text rationale.jsonld --out-file rationale.hash</div>
+        <div class="d">Publish the committee's rationale and hash the anchor.</div>
+        {{if .Ready}}
+        <div class="cmd">cardano-cli hash anchor-data --file-text rationale-{{.Slug}}.jsonld</div>
+        <div class="hashline">{{.AnchorHash}}</div>
+        <div class="d"><a class="rlink" href="/rationale/{{.Slug}}.jsonld">Download the document this hashes &#8595;</a></div>
+        {{else}}
+        <div class="d muted">No rationale authored yet.</div>
+        {{end}}
       </div>
     </div>
     <div class="st" data-i="1">
@@ -164,7 +214,7 @@ const submitHTML = `<!doctype html>
   </div>
 
   <div class="actions">
-    <button class="go" id="go">Sign with CC cold keys &amp; submit (demo)</button>
+    <button class="go" id="go" {{if not .Ready}}disabled{{end}}>Sign with CC cold keys &amp; submit (demo)</button>
   </div>
 
   <div class="result" id="result">

@@ -19,8 +19,21 @@ It runs standalone (no WordPress required), so any Constitutional Committee or c
 - **Constitutionality review** , connect to large language models and other tooling to assess whether a governance action aligns with the Cardano Constitution.
 - **Deliberation** , structured discussion among committee / consortium members.
 - **Internal voting** , members vote internally to settle the committee's position.
-- **Rationale** , author the committee's final, citable rationale for its vote.
+- **Rationale** , author the committee's final, citable rationale for its vote as a [CIP-136](https://github.com/cardano-foundation/CIPs/tree/master/CIP-0136) document, with the real on-chain anchor hash.
 - **On-chain submission** , package the vote and rationale and submit them on-chain.
+
+## The rationale is a real artifact
+
+Cella's committee rationale is not a preview or a mock-up. Authoring one produces a genuine CIP-136 JSON-LD document, downloadable at `/rationale/{action}.jsonld`, and Cella shows you its **anchor hash** — the blake2b-256 of exactly those bytes, and precisely the value that goes on-chain with the vote:
+
+```bash
+cardano-cli hash anchor-data --file-text rationale-<action>.jsonld
+# prints the same hash Cella displays
+```
+
+The document's `internalVote` block is filled from the chamber's own deliberation: each delegate voting Yes counts as *constitutional*, No as *unconstitutional*, and roster members who never took a position as *didNotVote* — which is how a multi-member committee shows the chain that its single vote came out of a real internal split. Delegates who recorded a position are named as the document's authors.
+
+Cella will not hand you a document that CIP-136 would reject: an anchor hash over an incomplete rationale looks submittable when it isn't, so the download is refused until the rationale is complete.
 
 ## Who it's for
 
@@ -44,7 +57,9 @@ go build -o cella .
 ./cella serve       # then open http://localhost:8080
 ```
 
-That's the whole install. Configuration is optional and by environment (see [`.env.example`](.env.example)): `CELLA_DB`, `CELLA_ADDR`, `KOIOS_URL`, `KOIOS_TOKEN`. Point `KOIOS_URL` at a Preprod/Preview instance to work against testnets.
+That's the whole install. Configuration is optional and by environment (see [`.env.example`](.env.example)): `CELLA_DB`, `CELLA_ADDR`, `CELLA_SECRET`, `KOIOS_URL`, `KOIOS_TOKEN`. Point `KOIOS_URL` at a Preprod/Preview instance to work against testnets.
+
+Set `CELLA_SECRET` for any deployment you intend to keep running: it signs the session cookies that carry a delegate's identity. Left unset, Cella generates a random key at startup — secure, but every restart signs everyone out.
 
 No API key is required. Koios is a public, decentralized Cardano query layer.
 

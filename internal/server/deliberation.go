@@ -1,75 +1,54 @@
 package server
 
-import "hash/fnv"
+// The chamber is where the body's delegates deliberate before the committee
+// casts its single on-chain vote. What it shows is exactly what the delegates
+// have recorded — nothing is inferred, generated, or filled in on their behalf.
+// A delegate who has not spoken is shown as not having spoken, because a
+// committee that cannot tell a real position from a placeholder cannot vote on
+// one.
 
-// MemberStance is a body member's internal position on a governance action:
-// their vote and a short rationale. For the demo these are generated
-// deterministically per action so the chamber shows a stable, plausible
-// deliberation — illustrating how delegates deliberate *before* the committee
-// casts its single on-chain vote. Not real votes.
+// MemberStance is a delegate's position on a governance action: their vote and
+// the rationale they gave for it. Recorded is false when the delegate has not
+// taken a position yet, in which case Vote and Rationale are empty.
 type MemberStance struct {
 	Member
-	Vote      string // Yes | No | Abstain
+	Vote      string // Yes | No | Abstain — empty until recorded
 	Rationale string
-	Real      bool // true once the member has actually cast (vs the demo stance)
+	Recorded  bool
 }
 
-var demoRationales = map[string][]string{
-	"Yes": {
-		"Consistent with the Constitution's treasury guardrails; the request is proportionate and well-scoped.",
-		"No conflict with the guiding principles, and the anchored rationale is sufficient and verifiable.",
-		"Serves the ecosystem's long-term interest and respects the defined process — I support it.",
-		"Precedent from prior actions supports approval; the safeguards here are adequate.",
-	},
-	"No": {
-		"The action exceeds the limits the Constitution sets for this category.",
-		"Anchored metadata is thin — I can't verify compliance with the relevant articles.",
-		"Process concerns: the required notice and deliberation window were not observed.",
-		"This would weaken the guardrails and set an unfavourable precedent.",
-	},
-	"Abstain": {
-		"Recusing — a potential conflict of interest with a party named in the action.",
-		"Insufficient detail to judge; I'd want clarification from the proposer first.",
-		"As written, this falls outside the committee's constitutional remit.",
-	},
-}
-
-// stanceFor returns a member's deterministic demo stance on an action, if that
-// member is part of the demo body. Used to show the signed-in delegate their
-// own chamber position (vote + rationale) on the index and the ballot form.
-func stanceFor(proposalID, member string) (MemberStance, bool) {
-	if member == "" {
-		return MemberStance{}, false
+// chamber returns every delegate on the roster with the position they have
+// recorded on the action, in roster order. Delegates who have not voted appear
+// with Recorded false rather than being omitted: the committee needs to see who
+// is still outstanding.
+func (s *Server) chamber(proposalID string) ([]MemberStance, error) {
+	votes, err := s.db.MemberVotesFor(proposalID)
+	if err != nil {
+		return nil, err
 	}
-	for _, st := range deliberate(proposalID, demoBody.Members) {
-		if st.Name == member {
-			return st, true
+
+	out := make([]MemberStance, 0, len(demoBody.Members))
+	for _, m := range demoBody.Members {
+		st := MemberStance{Member: m}
+		if v, ok := votes[m.Name]; ok && v.Vote != "" {
+			st.Vote, st.Rationale, st.Recorded = v.Vote, v.Rationale, true
 		}
+		out = append(out, st)
 	}
-	return MemberStance{}, false
+	return out, nil
 }
 
-// deliberate returns a deterministic demo deliberation for an action: each
-// member's stance + rationale, keyed off the proposal id so it's stable.
-func deliberate(proposalID string, members []Member) []MemberStance {
-	out := make([]MemberStance, 0, len(members))
-	for i, m := range members {
-		h := fnv.New32a()
-		_, _ = h.Write([]byte(proposalID))
-		_, _ = h.Write([]byte{byte(i), byte(len(proposalID))})
-		n := h.Sum32()
-
-		var vote string
-		switch n % 6 {
-		case 0, 1, 2:
-			vote = "Yes"
-		case 3, 4:
-			vote = "No"
-		default:
-			vote = "Abstain"
-		}
-		rs := demoRationales[vote]
-		out = append(out, MemberStance{Member: m, Vote: vote, Rationale: rs[int(n>>3)%len(rs)]})
+// position describes where the chamber stands, in words, for display.
+func (t tally) position() string {
+	if t.Recorded() == 0 {
+		return "No positions recorded yet"
 	}
-	return out
+	switch {
+	case t.Yes > t.No && t.Yes >= t.Abstain:
+		return "Leaning to approve"
+	case t.No > t.Yes && t.No >= t.Abstain:
+		return "Leaning to reject"
+	default:
+		return "No consensus yet"
+	}
 }

@@ -17,8 +17,16 @@ All notable changes to Cella are documented here. The format is based on [Keep a
 - **On-chain submission flow** — walks the credential-manager / hot-NFT multisig path (anchor, compose, build, co-sign, submit).
 - Initial public repository: README, governance docs (CONTRIBUTING, CODE_OF_CONDUCT, GOVERNANCE, MAINTAINERS, SUPPORT), SECURITY policy, Apache-2.0 LICENSE, CI workflow, and Dependabot configuration.
 
+- **Committee rationale (CIP-136)** — author the committee's citable rationale for its vote and emit it as a real CIP-136 JSON-LD document, downloadable at `/rationale/{action}.jsonld`. Cella computes and displays the document's **anchor hash** (blake2b-256 of the exact served bytes) — the same value `cardano-cli hash anchor-data --file-text` prints, and the one submitted on-chain with the vote. The `internalVote` block is derived from the chamber's own deliberation, and the delegates who recorded a position are named as authors. A rationale that CIP-136 would reject cannot be downloaded, because an anchor hash over an incomplete document looks submittable when it is not.
+
 ### Changed
+- **The chamber shows only real positions.** Member stances were previously generated deterministically from the proposal id to illustrate the flow. They are gone: the chamber now shows exactly what delegates have recorded, and a delegate who has not voted is shown as awaiting rather than being given an invented opinion. The committee's decision, its internal split, and the submission flow all derive from recorded votes alone, and a tie abstains rather than being resolved into a mandate.
+- On-chain submission is now gated on having an anchorable rationale — a committee votes with its reasoning attached — and displays the real anchor hash rather than a placeholder filename.
 - CI now takes its Go version from `go.mod` rather than a separately pinned version, so the two cannot drift apart.
 
+### Security
+- **Session cookies are signed** (HMAC-SHA256, keyed by `CELLA_SECRET`). The cookie previously carried a delegate's identity in the clear, so anyone could set it to any name on the roster and record votes as that delegate. An unverifiable cookie is now treated as no session at all.
+- **Vote and rationale posts require a CSRF token** bound to the session identity, so a token minted for one delegate cannot authorize a post as another.
+
 ### Notes
-- On-chain submission is currently a demonstration of the flow: it does not broadcast a transaction. Live submission requires the committee's cold keys.
+- On-chain submission does not broadcast a transaction: that requires the committee's cold keys. The rationale document and its anchor hash, however, are real — the same bytes and the same hash a committee would anchor.

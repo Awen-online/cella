@@ -1,0 +1,4 @@
+# The CIP-136 test vector is hashed byte-for-byte: its anchor hash is only
+# reproducible if the bytes survive checkout untouched. Never convert its line
+# endings.
+internal/rationale/testdata/** -text

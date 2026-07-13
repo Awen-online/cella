@@ -22,6 +22,7 @@ type Server struct {
 	ctpl *template.Template
 	etpl *template.Template
 	stpl *template.Template
+	rtpl *template.Template
 }
 
 // New builds a Server backed by db, signing sessions with secret. An empty
@@ -37,11 +38,13 @@ func New(db *store.DB, secret string) *Server {
 		ctpl: template.Must(template.New("constitution").Parse(withFonts(constHTML))),
 		etpl: template.Must(template.New("enter").Parse(withFonts(enterHTML))),
 		stpl: template.Must(template.New("submit").Parse(withFonts(submitHTML))),
+		rtpl: template.Must(template.New("rationale").Funcs(funcs).Parse(withFonts(rationaleHTML))),
 	}
 	s.mux.HandleFunc("/", s.handleIndex)
 	s.mux.HandleFunc("/fonts/", s.handleFonts)
 	s.mux.HandleFunc("/action/", s.handleAction)
 	s.mux.HandleFunc("/submit/", s.handleSubmit)
+	s.mux.HandleFunc("/rationale/", s.handleRationale)
 	s.mux.HandleFunc("/constitution", s.handleConstitution)
 	s.mux.HandleFunc("/enter", s.handleEnter)
 	s.mux.HandleFunc("/vote", s.handleCastVote)
@@ -76,20 +79,21 @@ type actionView struct {
 	HasReview        bool
 	AbstractHTML     template.HTML
 
-	// Chamber deliberation (demo): the body's internal member stances.
+	// The chamber: the body's delegates and the positions they have recorded.
 	BodyName        string
 	Deliberation    []MemberStance
-	ChYes, ChNo, ChAb int
+	Tally           tally
 	ChamberPosition string
+
+	// HasRationale is true once the committee's rationale has been authored.
+	HasRationale bool
 
 	// Full Constitutional Committee roster for this action (all seats; a seat
 	// with Voted=false is shown grayed as awaiting a vote).
 	Committee []CommitteeSeat
 
-	// The signed-in delegate's own internal position (drives the cast form).
-	// YourVote/YourRationale show the effective stance (a recorded vote if the
-	// delegate has cast one, otherwise their demo chamber stance); YouRecorded
-	// is true only once they have actually recorded a position.
+	// The signed-in delegate's own recorded position, which drives the ballot
+	// form. YouRecorded is false until they have actually taken one.
 	You           string
 	YourVote      string
 	YourRationale string
@@ -167,9 +171,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			av.Review, av.HasReview = rv, true
 		}
 		if mv, ok := myVotes[a.ProposalID]; ok {
-			av.YourVote = mv.Vote // a recorded position overrides the demo stance
-		} else if st, ok := stanceFor(a.ProposalID, you); ok {
-			av.YourVote = st.Vote // otherwise show the delegate's chamber stance
+			av.YourVote = mv.Vote
 		}
 		views = append(views, av)
 	}
@@ -226,47 +228,41 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	av.AbstractHTML = mdHTML(a.Abstract)
 
-	// Chamber deliberation: demo stances, overlaid with any real member votes.
+	// The chamber: every delegate's recorded position, and where that leaves the
+	// body. Nothing here is inferred — a delegate who has not voted shows as
+	// awaiting.
 	av.BodyName = demoBody.Name
-	av.Deliberation = deliberate(a.ProposalID, demoBody.Members)
-	realVotes, _ := s.db.MemberVotesFor(a.ProposalID)
-	for i := range av.Deliberation {
-		if mv, ok := realVotes[av.Deliberation[i].Name]; ok && mv.Vote != "" {
-			av.Deliberation[i].Vote = mv.Vote
-			av.Deliberation[i].Rationale = mv.Rationale
-			av.Deliberation[i].Real = true
-		}
+	av.Deliberation, err = s.chamber(a.ProposalID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+	t, _, err := s.tallyFor(a.ProposalID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	av.Tally = t
+	av.ChamberPosition = t.position()
+
 	sessionID, _ := s.member(r)
 	you := strings.TrimSuffix(sessionID, " (demo)")
 	av.You = you
 	av.CSRF = s.csrfToken(sessionID)
 	for _, st := range av.Deliberation {
 		if st.Name == you {
-			av.YourVote, av.YourRationale = st.Vote, st.Rationale
+			av.YourVote, av.YourRationale, av.YouRecorded = st.Vote, st.Rationale, st.Recorded
 			break
 		}
 	}
-	_, av.YouRecorded = realVotes[you]
 
-	for _, st := range av.Deliberation {
-		switch st.Vote {
-		case "Yes":
-			av.ChYes++
-		case "No":
-			av.ChNo++
-		case "Abstain":
-			av.ChAb++
-		}
+	// A rationale can only be anchored once someone has written one.
+	rat, _, err := s.db.RationaleFor(a.ProposalID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	switch {
-	case av.ChYes > av.ChNo && av.ChYes >= av.ChAb:
-		av.ChamberPosition = "Leaning to approve"
-	case av.ChNo > av.ChYes && av.ChNo >= av.ChAb:
-		av.ChamberPosition = "Leaning to reject"
-	default:
-		av.ChamberPosition = "No consensus yet"
-	}
+	av.HasRationale = !rat.Empty()
 
 	// Full committee roster: every seat, voted or awaiting.
 	byCred := make(map[string]store.VoteRow, len(av.Votes))
@@ -489,7 +485,9 @@ const detailHTML = `<!doctype html>
   .chpos { font-size:14px; color:var(--muted); margin-bottom:14px; }
   .chpos b { color:var(--ivory); }
   .chpos .y { color:var(--green); } .chpos .n { color:var(--red); } .chpos .a { color:var(--muted); }
-  .chpos .demo { font-family:'Cinzel',serif; font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--goldb); border:1px solid rgba(245,210,122,.4); border-radius:999px; padding:1px 8px; margin-left:6px; }
+  .delib.awaiting { opacity:.5; }
+  .dvote.pending { color:var(--muted); border-color:rgba(139,147,184,.3); }
+  .drat.none { color:var(--muted); font-style:italic; }
   .delib-list { display:flex; flex-direction:column; gap:14px; }
   .delib { display:grid; grid-template-columns:76px 1fr; gap:13px; align-items:start; }
   .dvote { font-family:'Cinzel',serif; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; text-align:center; padding:6px 0; border-radius:8px; border:1px solid; }
@@ -497,7 +495,6 @@ const detailHTML = `<!doctype html>
   .dname { color:var(--ivory); font-family:'Cinzel',serif; font-size:14px; font-weight:700; letter-spacing:.02em; }
   .drole { color:var(--muted); font-family:'EB Garamond',serif; font-size:12.5px; font-weight:400; letter-spacing:0; text-transform:none; margin-left:6px; }
   .drat { color:var(--body); font-size:14.5px; line-height:1.5; margin-top:3px; }
-  .realtag { color:var(--green); font-family:'Cinzel',serif; font-size:9px; letter-spacing:.08em; text-transform:uppercase; border:1px solid rgba(75,189,136,.5); border-radius:999px; padding:1px 7px; margin-left:8px; }
   .castnote { font-size:13.5px; color:var(--muted); margin:2px 0 12px; line-height:1.5; }
   .castradios { display:flex; gap:10px; margin:6px 0 12px; flex-wrap:wrap; }
   .cr { display:inline-flex; align-items:center; gap:7px; border:1px solid rgba(201,137,42,.3); border-radius:999px; padding:8px 16px; cursor:pointer; font-size:14px; color:var(--body); }
@@ -505,8 +502,11 @@ const detailHTML = `<!doctype html>
   .cr:hover { border-color:rgba(245,210,122,.6); }
   .castform textarea { width:100%; min-height:78px; background:var(--forum); border:1px solid rgba(201,137,42,.25); border-radius:10px; color:var(--body); font-family:'EB Garamond',Georgia,serif; font-size:15px; padding:11px 13px; resize:vertical; }
   .cast-btn { margin-top:12px; font-family:'Cinzel',serif; font-size:12px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; color:var(--forum); background:linear-gradient(180deg,var(--goldb),var(--gold)); border:0; border-radius:10px; padding:11px 22px; cursor:pointer; }
+  .onward { display:flex; gap:12px; flex-wrap:wrap; margin:6px 0 2px; }
   .submit-btn { display:inline-block; font-family:'Cinzel',serif; font-size:13px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; color:var(--forum); background:linear-gradient(180deg,var(--goldb),var(--gold)); text-decoration:none; border-radius:10px; padding:12px 22px; }
   .submit-btn:hover { filter:brightness(1.05); }
+  .rat-btn { display:inline-block; font-family:'Cinzel',serif; font-size:13px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; color:var(--goldb); border:1px solid rgba(245,210,122,.45); text-decoration:none; border-radius:10px; padding:12px 22px; }
+  .rat-btn:hover { background:rgba(245,210,122,.1); }
   footer { padding:20px 6vw; color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
 </style>
 </head>
@@ -543,14 +543,22 @@ const detailHTML = `<!doctype html>
 
   <div class="card">
     <h2>Chamber deliberation — {{.BodyName}}</h2>
-    <div class="chpos">Chamber position: <b>{{.ChamberPosition}}</b> &nbsp;·&nbsp; <span class="y">{{.ChYes}} Yes</span> · <span class="n">{{.ChNo}} No</span> · <span class="a">{{.ChAb}} Abstain</span> <span class="demo">demo</span></div>
+    <div class="chpos">Chamber position: <b>{{.ChamberPosition}}</b> &nbsp;·&nbsp; <span class="y">{{.Tally.Yes}} Yes</span> · <span class="n">{{.Tally.No}} No</span> · <span class="a">{{.Tally.Abstain}} Abstain</span> · <span class="a">{{.Tally.DidNotVote}} awaiting</span></div>
     <div class="delib-list">
       {{range .Deliberation}}
-      <div class="delib">
+      <div class="delib{{if not .Recorded}} awaiting{{end}}">
+        {{if .Recorded}}
         <div class="dvote {{if eq .Vote "Yes"}}y{{else if eq .Vote "No"}}n{{else}}a{{end}}">{{.Vote}}</div>
+        {{else}}
+        <div class="dvote pending">—</div>
+        {{end}}
         <div>
-          <div class="dname">{{.Member.Name}} <span class="drole">{{.Member.Role}}</span>{{if .Real}} <span class="realtag">recorded</span>{{end}}</div>
-          <div class="drat">{{.Rationale}}</div>
+          <div class="dname">{{.Member.Name}} <span class="drole">{{.Member.Role}}</span></div>
+          {{if .Recorded}}
+            {{if .Rationale}}<div class="drat">{{.Rationale}}</div>{{else}}<div class="drat none">Recorded without a rationale.</div>{{end}}
+          {{else}}
+            <div class="drat none">Has not recorded a position yet.</div>
+          {{end}}
         </div>
       </div>
       {{end}}
@@ -560,7 +568,7 @@ const detailHTML = `<!doctype html>
   {{if .You}}
   <div class="card" id="your-position">
     <h2>Your position &middot; {{.You}}</h2>
-    {{if .YouRecorded}}<div class="castnote">You have recorded this position. Update it any time before the committee submits.</div>{{else}}<div class="castnote">Showing your chamber stance for this action. Record it to confirm it as your position.</div>{{end}}
+    {{if .YouRecorded}}<div class="castnote">You have recorded this position. Update it any time before the committee submits.</div>{{else}}<div class="castnote">You have not recorded a position on this action yet. Your co-delegates see it as soon as you do.</div>{{end}}
     <form method="post" action="/vote" class="castform">
       <input type="hidden" name="slug" value="{{.Slug}}">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -575,7 +583,8 @@ const detailHTML = `<!doctype html>
   </div>
   {{end}}
 
-  <div style="margin:6px 0 2px;">
+  <div class="onward">
+    <a class="rat-btn" href="/rationale/{{.Slug}}">Author the committee rationale &#8594;</a>
     <a class="submit-btn" href="/submit/{{.Slug}}">Submit committee vote on-chain &#8594;</a>
   </div>
 

@@ -57,6 +57,19 @@ CREATE TABLE IF NOT EXISTS member_votes (
   updated_at  INTEGER,
   PRIMARY KEY (proposal_id, member)
 );
+
+-- The committee's final, citable rationale for its vote — the body of the
+-- CIP-136 document that is anchored on-chain alongside the vote.
+CREATE TABLE IF NOT EXISTS rationales (
+  proposal_id      TEXT PRIMARY KEY,
+  summary          TEXT,        -- <= 300 chars (CIP-136)
+  statement        TEXT,        -- the full rationale (markdown)
+  precedent        TEXT,
+  counterargument  TEXT,
+  conclusion       TEXT,
+  authored_by      TEXT,        -- the delegate who last edited it
+  updated_at       INTEGER
+);
 `
 
 // DB wraps the SQLite connection.
@@ -363,6 +376,58 @@ FROM member_votes WHERE member = ?`, member)
 		out[pid] = m
 	}
 	return out, rows.Err()
+}
+
+// Rationale is the committee's authored rationale for its vote on an action —
+// the reasoning that becomes the body of the anchored CIP-136 document.
+type Rationale struct {
+	Summary         string
+	Statement       string
+	Precedent       string
+	Counterargument string
+	Conclusion      string
+	AuthoredBy      string
+	UpdatedAt       int64
+}
+
+// Empty reports whether nothing has been authored yet.
+func (r Rationale) Empty() bool {
+	return strings.TrimSpace(r.Summary) == "" && strings.TrimSpace(r.Statement) == ""
+}
+
+// UpsertRationale records (or replaces) the committee's rationale for an action.
+func (d *DB) UpsertRationale(proposalID string, r Rationale) error {
+	_, err := d.sql.Exec(`
+INSERT INTO rationales
+  (proposal_id, summary, statement, precedent, counterargument, conclusion, authored_by, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(proposal_id) DO UPDATE SET
+  summary=excluded.summary, statement=excluded.statement, precedent=excluded.precedent,
+  counterargument=excluded.counterargument, conclusion=excluded.conclusion,
+  authored_by=excluded.authored_by, updated_at=excluded.updated_at`,
+		proposalID, r.Summary, r.Statement, r.Precedent, r.Counterargument, r.Conclusion,
+		r.AuthoredBy, time.Now().Unix())
+	return err
+}
+
+// RationaleFor returns the committee's rationale for an action. The bool is
+// false when none has been authored.
+func (d *DB) RationaleFor(proposalID string) (Rationale, bool, error) {
+	var r Rationale
+	row := d.sql.QueryRow(`
+SELECT COALESCE(summary,''), COALESCE(statement,''), COALESCE(precedent,''),
+       COALESCE(counterargument,''), COALESCE(conclusion,''), COALESCE(authored_by,''),
+       COALESCE(updated_at,0)
+FROM rationales WHERE proposal_id = ?`, proposalID)
+	err := row.Scan(&r.Summary, &r.Statement, &r.Precedent, &r.Counterargument,
+		&r.Conclusion, &r.AuthoredBy, &r.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return r, false, nil
+	}
+	if err != nil {
+		return r, false, err
+	}
+	return r, true, nil
 }
 
 // ReviewsFor returns reviews for the given proposal IDs, keyed by proposal_id.
