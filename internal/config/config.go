@@ -39,6 +39,12 @@ type Config struct {
 	// Cella, decides whether a vote transaction is accepted.
 	HotNFTAddr string
 
+	// LogoPath is a file on disk — the body's own mark. Cella serves it itself
+	// rather than letting the page hot-link it: the Content-Security-Policy is
+	// img-src 'self', and a governance tool should not go dark because someone
+	// else's server did.
+	LogoPath string
+
 	// Constitutionality review — bring your own model. Any OpenAI-compatible
 	// endpoint (OpenAI, OpenRouter, Groq, vLLM, LM Studio, local Ollama).
 	LLMURL   string // e.g. https://api.openai.com/v1 or http://localhost:11434/v1
@@ -57,6 +63,7 @@ func Load() Config {
 		Demo:       truthy(os.Getenv("CELLA_DEMO")),
 		RosterPath: os.Getenv("CELLA_ROSTER"),
 		HotNFTAddr: os.Getenv("CELLA_HOT_NFT_ADDR"),
+		LogoPath:   os.Getenv("CELLA_LOGO"),
 		LLMURL:     os.Getenv("CELLA_LLM_URL"),
 		LLMModel:   os.Getenv("CELLA_LLM_MODEL"),
 		LLMKey:     os.Getenv("CELLA_LLM_KEY"),

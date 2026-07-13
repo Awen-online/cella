@@ -51,7 +51,27 @@ func seedServer(t *testing.T) (*Server, koios.GovernanceAction) {
 
 	// Demo mode on: most tests exercise the chamber via roster sign-in. The
 	// tests that care about the gate build their own server.
-	return New(db, Options{Secret: "test-secret", Demo: true}), act
+	//
+	// The body is a fixture, deliberately not the roster Cella ships with: a
+	// test that breaks because a real member joined or left the Curia is a test
+	// asserting the wrong thing.
+	s := New(db, Options{Secret: "test-secret", Demo: true, Body: testBody})
+	return s, act
+}
+
+// testBody is the five-delegate consortium the chamber tests deliberate as.
+var testBody = Body{
+	Name:  "Test Consortium",
+	Short: "The Test",
+	Kind:  "Constitutional Committee member",
+	Blurb: "A fixture body.",
+	Members: []Member{
+		{Name: "Faustina Vela", Role: "Delegate · Treasury"},
+		{Name: "Cassius Aurel", Role: "Delegate · Parameters"},
+		{Name: "Junia Marcia", Role: "Delegate · Precedent"},
+		{Name: "Titus Varo", Role: "Delegate · Outreach"},
+		{Name: "Cullah", Role: "Delegate · At-large"},
+	},
 }
 
 func get(t *testing.T, s *Server, path string) *httptest.ResponseRecorder {

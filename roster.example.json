@@ -1,34 +1,72 @@
 {
   "_comment": [
-    "Cella delegate roster. Copy to roster.json, fill in your body's delegates,",
-    "and point CELLA_ROSTER at it.",
+    "Who this Cella instance belongs to. Copy to roster.json and point CELLA_ROSTER at it.",
     "",
-    "address     — the delegate's Cardano wallet address (bech32, addr1... or stake1...).",
-    "              This is how Cella recognises them when they sign in: the public key",
-    "              inside their wallet signature must hash to a credential this address",
-    "              carries. A delegate with no address cannot sign in with a wallet.",
+    "A Constitutional Committee seat may be held by a consortium of delegates or by a",
+    "single member — both are common. Cella does not assume the first: list one member",
+    "and the chamber describes itself in the singular.",
     "",
-    "voteKeyHash — the delegate's on-chain voting credential (hex, blake2b-224). This is",
-    "              the key hash that appears in the hot NFT datum's voting group and that",
-    "              signs the committee's vote transaction. It is usually NOT the same key",
-    "              as the wallet: the wallet gets a delegate into Cella, the voting key",
-    "              gets the committee's vote onto the chain. Leave it out until you have it."
+    "name / short  the body's name, and a short form for headings ('Cardano Curia' / 'The Curia').",
+    "kind          what the body is, e.g. 'Constitutional Committee member'.",
+    "logo          a path Cella SERVES — not an external URL. The Content-Security-Policy is",
+    "              img-src 'self', deliberately, and a governance tool should not go dark",
+    "              because someone else's server did. Point CELLA_LOGO at a file on disk and",
+    "              Cella serves it at /brand/logo; set this to '/brand/logo' to use it.",
+    "",
+    "For each member:",
+    "  handle      how they are known publicly (an X handle). Shown on the dashboard, so the",
+    "              body reads as a group of people rather than a list of strings.",
+    "  address     their Cardano wallet address (bech32). This is how Cella recognises them at",
+    "              sign-in: the public key inside their wallet signature must hash to a",
+    "              credential this address carries. A member with no address cannot sign in.",
+    "  voteKeyHash their on-chain voting credential (hex, blake2b-224) — the key hash that",
+    "              appears in the hot NFT datum's voting group and that signs the committee's",
+    "              vote transaction. Usually NOT the same key as the wallet: the wallet gets a",
+    "              member into Cella, the voting key gets the committee's vote onto the chain.",
+    "              Leave it empty until you have it."
   ],
 
   "name": "Cardano Curia",
+  "short": "The Curia",
   "kind": "Constitutional Committee member",
   "blurb": "A consortium that deliberates on Cardano governance actions, assesses their constitutionality, and casts a single committee vote with a shared rationale.",
+  "logo": "/brand/logo",
+  "website": "https://www.cardanocuria.com",
+  "x": "https://x.com/cardanocuria",
 
   "members": [
     {
-      "name": "Cullah",
-      "role": "Delegate · At-large",
+      "name": "James Meidinger",
+      "role": "Member",
+      "handle": "@blockjock65",
+      "address": "",
+      "voteKeyHash": ""
+    },
+    {
+      "name": "Mladen Lamesevic",
+      "role": "Member",
+      "handle": "@MladenLm",
+      "address": "",
+      "voteKeyHash": ""
+    },
+    {
+      "name": "Sheldon Hunt",
+      "role": "Member",
+      "handle": "@SundialSheldon",
+      "address": "",
+      "voteKeyHash": ""
+    },
+    {
+      "name": "Ian McCullough",
+      "role": "Member",
+      "handle": "@CullahMusic",
       "address": "addr1q8ejkg9t0tkqxkms3nqe2e90rgdn680mg9vfq5ygd06j94d0xdpt8x0tr7mpserrhsssmh0d8ug7494ndwr53rcs3veq6dulc9",
       "voteKeyHash": ""
     },
     {
-      "name": "A. Delegate",
-      "role": "Delegate · Treasury & Withdrawals",
+      "name": "Kris Kowalsky",
+      "role": "Member",
+      "handle": "@KrisKowalsky",
       "address": "",
       "voteKeyHash": ""
     }

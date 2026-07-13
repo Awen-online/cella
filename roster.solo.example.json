@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "A Constitutional Committee seat held by one member, which is as common as a",
+    "consortium. Cella describes itself in the singular when the body is one person:",
+    "'The member', not 'The body — 1 delegates'."
+  ],
+  "name": "A. N. Other",
+  "kind": "Constitutional Committee member",
+  "blurb": "An independent Constitutional Committee member.",
+  "members": [
+    {
+      "name": "A. N. Other",
+      "role": "Constitutional Committee member",
+      "handle": "@anothercc",
+      "address": "",
+      "voteKeyHash": ""
+    }
+  ]
+}

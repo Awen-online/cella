@@ -72,6 +72,7 @@ func New(db *store.DB, opts Options) *Server {
 	}
 	s.mux.HandleFunc("/", s.handleIndex)
 	s.mux.HandleFunc("/fonts/", s.handleFonts)
+	s.mux.HandleFunc("/brand/", s.handleBrand)
 	s.mux.HandleFunc("/action/", s.handleAction)
 	s.mux.HandleFunc("/submit/", s.handleSubmit)
 	s.mux.HandleFunc("/rationale/", s.handleRationale)
@@ -193,8 +194,10 @@ type CommitteeSeat struct {
 	Rationale  string
 }
 
-// idxView is the data for the actions index: the signed-in member + the rows.
+// idxView is the data for the actions index: the body whose chamber this is,
+// the signed-in member, and the rows.
 type idxView struct {
+	Body    Body
 	Member  string
 	Actions []actionView
 }
@@ -281,7 +284,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	slices.SortStableFunc(views, byUrgency)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tpl.Execute(w, idxView{Member: m, Actions: views}); err != nil {
+	if err := s.tpl.Execute(w, idxView{Body: s.body, Member: m, Actions: views}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -515,6 +518,21 @@ const indexHTML = `<!doctype html>
   header .topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; }
   header .brand { display:flex; align-items:center; gap:13px; }
   header .badge { width:42px; height:42px; flex:0 0 auto; }
+  header .bodylogo { height:54px; width:auto; flex:0 0 auto; }
+  header .kind { color:var(--muted); font-family:'Cinzel',serif; font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; margin-top:4px; }
+  header .hnav { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-top:12px; }
+  header a.blink { color:var(--muted); text-decoration:none; font-size:12.5px; }
+  header a.blink:hover { color:var(--goldb); }
+  header .cella-by { margin-left:auto; color:var(--muted); font-size:11px; font-family:'Cinzel',serif; letter-spacing:.1em; text-transform:uppercase; }
+  header .cella-by b { color:var(--gold); letter-spacing:.06em; }
+  .bodycard { background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:16px 20px; margin-bottom:22px; }
+  .bc-h { font-family:'Cinzel',serif; color:var(--gold); font-size:11px; letter-spacing:.12em; text-transform:uppercase; margin-bottom:14px; }
+  .bc-people { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:14px; }
+  .bc-p { min-width:0; }
+  .bc-n { font-family:'Cinzel',serif; color:var(--ivory); font-size:14px; font-weight:700; letter-spacing:.02em; }
+  .bc-r { color:var(--muted); font-size:12.5px; margin-top:2px; }
+  .bc-h2 { display:inline-block; margin-top:4px; color:var(--blue); text-decoration:none; font-size:12.5px; }
+  .bc-h2:hover { color:var(--goldb); }
   header a.leave { color:var(--muted); text-decoration:none; font-family:'Cinzel',serif; font-size:11px; letter-spacing:.1em; text-transform:uppercase; white-space:nowrap; }
   header a.leave:hover { color:var(--gold); }
   header .who { display:flex; align-items:center; gap:14px; }
@@ -579,16 +597,37 @@ const indexHTML = `<!doctype html>
   <div class="hin">
   <div class="topbar">
     <div class="brand">
-      <svg class="badge" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Cella"><rect width="100" height="100" rx="22" fill="#0A0E27"></rect><g transform="translate(18,16) scale(0.64)"><path d="M22 86 L22 42 A28 28 0 0 1 78 42 L78 86" fill="none" stroke="#FAF7EE" stroke-width="9"></path><rect x="11" y="84" width="78" height="9" rx="1.5" fill="#FAF7EE"></rect><circle cx="50" cy="62" r="6.5" fill="#F5D27A"></circle></g></svg>
-      <span class="name">CE<b>LL</b>A</span>
+      {{if .Body.Logo}}<img class="bodylogo" src="{{.Body.Logo}}" alt="{{.Body.Name}}">{{end}}
+      <div>
+        <div class="name">{{.Body.Name}}</div>
+        <div class="kind">{{.Body.Kind}}{{if not .Body.Solo}} · {{len .Body.Members}} delegates{{end}}</div>
+      </div>
     </div>
     <div class="who">{{if .Member}}<span class="whoami">Signed in as {{.Member}}</span>{{end}}<a class="leave" href="/logout">Sign out</a></div>
   </div>
-  <div class="tag">Self-hostable Cardano Constitutional Committee governance</div>
-  <a class="nav" href="/constitution">Read the Constitution →</a>
+  <div class="tag">{{.Body.Blurb}}</div>
+  <div class="hnav">
+    <a class="nav" href="/constitution">Read the Constitution →</a>
+    {{if .Body.Website}}<a class="blink" href="{{.Body.Website}}" target="_blank" rel="noopener">{{.Body.Website}} ↗</a>{{end}}
+    {{if .Body.X}}<a class="blink" href="{{.Body.X}}" target="_blank" rel="noopener">X ↗</a>{{end}}
+    <span class="cella-by">powered by <b>CELLA</b></span>
+  </div>
   </div>
 </header>
 <main>
+  <div class="bodycard">
+    <div class="bc-h">{{if .Body.Solo}}The member{{else}}The body &mdash; {{.Body.Display}}{{end}}</div>
+    <div class="bc-people">
+      {{range .Body.Members}}
+      <div class="bc-p">
+        <div class="bc-n">{{.Name}}</div>
+        <div class="bc-r">{{.Role}}</div>
+        {{if .Handle}}<a class="bc-h2" href="{{.Link}}" target="_blank" rel="noopener">{{.Handle}}</a>{{end}}
+      </div>
+      {{end}}
+    </div>
+  </div>
+
   <h2>Governance actions &amp; Constitutional Committee votes</h2>
   <div class="legend">Constitutionality tags are AI-assisted assessments — the committee decides and signs. Run <code>cella review</code> to generate them with your own model.</div>
   {{if .Actions}}

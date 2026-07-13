@@ -57,7 +57,7 @@ func isOpenPath(p string) bool {
 	if p == "/enter" || p == "/healthz" || p == "/logout" {
 		return true
 	}
-	return strings.HasPrefix(p, "/auth/") || strings.HasPrefix(p, "/fonts/")
+	return strings.HasPrefix(p, "/auth/") || strings.HasPrefix(p, "/fonts/") || strings.HasPrefix(p, "/brand/")
 }
 
 // member returns the identity in the current session. The second result is

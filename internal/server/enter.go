@@ -36,6 +36,7 @@ const enterHTML = `<!doctype html>
   body { margin:0; min-height:100vh; background:radial-gradient(120% 80% at 50% -10%, #131A40 0%, var(--forum) 60%); color:var(--body);
     font-family:'EB Garamond',Georgia,'Times New Roman',serif; display:flex; flex-direction:column; align-items:center; padding:48px 20px 60px; }
   .badge { width:74px; height:74px; }
+  .bodymark { width:auto; height:96px; max-width:min(420px,80vw); }
   .eyebrow { font-family:'Cinzel','Trajan Pro',Georgia,serif; color:var(--gold); font-size:12px; letter-spacing:.34em; text-transform:uppercase; margin:22px 0 6px; }
   h1.salve { font-family:'Cinzel','Trajan Pro',Georgia,serif; color:var(--ivory); font-weight:800; letter-spacing:.14em; font-size:clamp(30px,6vw,46px); margin:0; text-align:center; }
   .lede { max-width:620px; text-align:center; font-size:18px; line-height:1.6; margin:16px auto 4px; }
@@ -48,6 +49,8 @@ const enterHTML = `<!doctype html>
   .m { background:var(--veil); border:1px solid rgba(201,137,42,.22); border-radius:12px; padding:14px 15px; }
   .m .name { font-family:'Cinzel',serif; color:var(--ivory); font-weight:700; font-size:15px; letter-spacing:.03em; }
   .m .role { color:var(--muted); font-size:13.5px; margin:3px 0 8px; }
+  .m .handle { display:inline-block; color:var(--blue-l); text-decoration:none; font-size:13px; margin-bottom:6px; }
+  .m .handle:hover { color:var(--goldb); }
   .m .addr { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; color:var(--goldb); font-size:11px; word-break:break-all; opacity:.85; }
   .m form { margin-top:10px; }
   .m .enter { width:100%; background:transparent; border:1px solid rgba(201,137,42,.4); color:var(--gold); font-family:'Cinzel',serif;
@@ -73,11 +76,17 @@ const enterHTML = `<!doctype html>
   .demo-warn b { color:#f0b8b1; }
   .demo-warn code { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:12px; color:var(--goldb); }
   a:focus-visible, button:focus-visible { outline:2px solid var(--goldb); outline-offset:3px; }
-  footer { color:var(--muted); font-size:12.5px; margin-top:40px; text-align:center; font-family:'JetBrains Mono',ui-monospace,monospace; }
+  .blinks { display:flex; gap:18px; justify-content:center; margin-top:34px; }
+  .blinks a { color:var(--muted); text-decoration:none; font-size:13px; }
+  .blinks a:hover { color:var(--goldb); }
+  footer { color:var(--muted); font-size:12.5px; margin-top:18px; text-align:center; font-family:'JetBrains Mono',ui-monospace,monospace; }
   @media (prefers-reduced-motion:no-preference){ h1.salve{ animation:fade .6s ease both; } @keyframes fade{ from{opacity:0; transform:translateY(6px);} to{opacity:1;} } }
 </style>
 </head>
 <body>
+  {{if .Logo}}
+  <img class="bodymark" src="{{.Logo}}" alt="{{.Name}}">
+  {{else}}
   <svg class="badge" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Cella">
     <rect width="100" height="100" rx="22" fill="#0A0E27"></rect>
     <g transform="translate(18,16) scale(0.64)">
@@ -86,6 +95,7 @@ const enterHTML = `<!doctype html>
       <circle cx="50" cy="62" r="6.5" fill="#F5D27A"></circle>
     </g>
   </svg>
+  {{end}}
   <div class="eyebrow">Salve, member</div>
   <h1 class="salve">The Private Chamber</h1>
   <div class="wrap">
@@ -106,13 +116,14 @@ const enterHTML = `<!doctype html>
     {{end}}
 
     <div class="rule"></div>
-    <div class="roster-label">The body — {{len .Members}} delegates</div>
+    <div class="roster-label">{{if .Solo}}The member{{else}}The body — {{len .Members}} delegates{{end}}</div>
     <div class="roster">
       {{range .Members}}
       <div class="m">
         <div class="name">{{.Name}}</div>
         <div class="role">{{.Role}}</div>
-        <div class="addr">{{.Address}}</div>
+        {{if .Handle}}<a class="handle" href="{{.Link}}" target="_blank" rel="noopener">{{.Handle}}</a>{{end}}
+        {{if .Address}}<div class="addr">{{.Address}}</div>{{end}}
         {{if $.Demo}}
         <form method="post" action="/auth/member">
           <input type="hidden" name="member" value="{{.Name}}">
@@ -132,7 +143,11 @@ const enterHTML = `<!doctype html>
     </div>
   </div>
 
-  <footer>Cella · self-hostable Constitutional Committee governance · Apache-2.0</footer>
+  <div class="blinks">
+    {{if .Website}}<a href="{{.Website}}" target="_blank" rel="noopener">{{.Website}} ↗</a>{{end}}
+    {{if .X}}<a href="{{.X}}" target="_blank" rel="noopener">X ↗</a>{{end}}
+  </div>
+  <footer>Powered by Cella · self-hostable Constitutional Committee governance · Apache-2.0</footer>
 
   <script>
   // Real CIP-30 connect-and-sign with a wallet picker: choose a wallet, it signs

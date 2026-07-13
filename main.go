@@ -70,6 +70,7 @@ configuration (environment):
   CELLA_DEMO       enable roster sign-in — NO AUTH; never on a reachable instance
   CELLA_ROSTER     path to the delegate roster JSON (default: placeholder roster)
   CELLA_HOT_NFT_ADDR  hot NFT script address — its datum sets the voting group + quorum
+  CELLA_LOGO       path to the body's logo file (served by Cella, not hot-linked)
   KOIOS_URL        Koios API base URL            (default https://api.koios.rest/api/v1)
   KOIOS_TOKEN      optional Koios bearer token
   CELLA_LLM_URL    OpenAI-compatible endpoint    (e.g. http://localhost:11434/v1 for Ollama)
@@ -214,10 +215,13 @@ func runServe(cfg config.Config, args []string) error {
 	if err != nil {
 		return err
 	}
+	if cfg.LogoPath != "" {
+		server.SetLogo(cfg.LogoPath)
+	}
 	if cfg.RosterPath == "" {
-		log.Printf("warning: CELLA_ROSTER is not set — using the placeholder roster; no wallet can sign in")
+		log.Printf("warning: CELLA_ROSTER is not set — using the built-in roster; no wallet can sign in")
 	} else {
-		log.Printf("roster: %s (%d delegates)", body.Name, len(body.Members))
+		log.Printf("body: %s (%d member(s))", body.Name, len(body.Members))
 	}
 
 	if cfg.Secret == "" {
