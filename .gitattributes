@@ -2,3 +2,4 @@
 # reproducible if the bytes survive checkout untouched. Never convert its line
 # endings.
 internal/rationale/testdata/** -text
+internal/txbody/testdata/** -text
