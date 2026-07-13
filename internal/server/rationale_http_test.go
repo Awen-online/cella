@@ -121,10 +121,10 @@ func TestDownloadJSONLD(t *testing.T) {
 		t.Fatalf("seed rationale: %v", err)
 	}
 	// Two delegates take a position, so internalVote has something real in it.
-	if err := s.db.UpsertMemberVote(pid, "Junia Marcia", "Yes", "Sound."); err != nil {
+	if err := s.db.UpsertMemberVote(pid, "Junia Marcia", "Yes", "Sound.", "", ""); err != nil {
 		t.Fatalf("seed vote: %v", err)
 	}
-	if err := s.db.UpsertMemberVote(pid, "Titus Varo", "No", "Overreach."); err != nil {
+	if err := s.db.UpsertMemberVote(pid, "Titus Varo", "No", "Overreach.", "", ""); err != nil {
 		t.Fatalf("seed vote: %v", err)
 	}
 
@@ -238,10 +238,10 @@ func TestTallyForCountsRoster(t *testing.T) {
 	s, _ := seedServer(t)
 	_, pid := slugOf(s, t)
 
-	if err := s.db.UpsertMemberVote(pid, "Junia Marcia", "Yes", ""); err != nil {
+	if err := s.db.UpsertMemberVote(pid, "Junia Marcia", "Yes", "", "", ""); err != nil {
 		t.Fatalf("seed vote: %v", err)
 	}
-	if err := s.db.UpsertMemberVote(pid, "Cullah", "Abstain", ""); err != nil {
+	if err := s.db.UpsertMemberVote(pid, "Cullah", "Abstain", "", "", ""); err != nil {
 		t.Fatalf("seed vote: %v", err)
 	}
 

@@ -15,6 +15,7 @@ type MemberStance struct {
 	Vote      string // Yes | No | Abstain — empty until recorded
 	Rationale string
 	Recorded  bool
+	Signed    bool // the delegate signed this position with their wallet
 }
 
 // chamber returns every delegate on the roster with the position they have
@@ -32,6 +33,7 @@ func (s *Server) chamber(proposalID string) ([]MemberStance, error) {
 		st := MemberStance{Member: m}
 		if v, ok := votes[m.Name]; ok && v.Vote != "" {
 			st.Vote, st.Rationale, st.Recorded = v.Vote, v.Rationale, true
+			st.Signed = v.Signed()
 		}
 		out = append(out, st)
 	}

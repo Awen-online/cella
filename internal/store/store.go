@@ -96,12 +96,17 @@ func Open(path string) (*DB, error) {
 		sdb.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
-	// Idempotent upgrade for databases created before the abstract column;
-	// a duplicate-column error just means it is already present.
-	if _, err := sdb.Exec(`ALTER TABLE governance_actions ADD COLUMN abstract TEXT`); err != nil &&
-		!strings.Contains(err.Error(), "duplicate column") {
-		// Non-fatal: a fresh database already has the column.
-		_ = err
+	// Idempotent upgrades for databases created before a column existed; a
+	// duplicate-column error just means it is already present.
+	for _, stmt := range []string{
+		`ALTER TABLE governance_actions ADD COLUMN abstract TEXT`,
+		`ALTER TABLE member_votes ADD COLUMN signature TEXT`,
+		`ALTER TABLE member_votes ADD COLUMN pubkey TEXT`,
+	} {
+		if _, err := sdb.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			// Non-fatal: a fresh database already has the column.
+			_ = err
+		}
 	}
 	return &DB{sql: sdb}, nil
 }
@@ -325,20 +330,35 @@ ON CONFLICT(proposal_id) DO UPDATE SET
 }
 
 // MemberVote is a body delegate's internal position on an action.
+//
+// Signature and PubKey are present when the delegate signed the position with
+// their wallet, which is what makes it attributable to them rather than merely
+// to whoever held their session. An unsigned vote is still a vote — a demo
+// instance has no wallets — but the two are never conflated in the UI.
 type MemberVote struct {
 	Member    string
 	Vote      string
 	Rationale string
+	Signature string // hex COSE_Sign1 over the vote message, or ""
+	PubKey    string // hex COSE_Key of the signer, or ""
 }
 
+// Signed reports whether the delegate signed this position with their wallet.
+func (m MemberVote) Signed() bool { return m.Signature != "" }
+
 // UpsertMemberVote records (or replaces) a delegate's internal vote + rationale.
-func (d *DB) UpsertMemberVote(proposalID, member, vote, rationale string) error {
+// A signature (which may be empty) is stored with it: re-recording a position
+// without signing replaces the signature too, because a signature over an old
+// position says nothing about the new one.
+func (d *DB) UpsertMemberVote(proposalID, member, vote, rationale, signature, pubkey string) error {
 	_, err := d.sql.Exec(`
-INSERT INTO member_votes (proposal_id, member, vote, rationale, updated_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO member_votes (proposal_id, member, vote, rationale, signature, pubkey, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(proposal_id, member) DO UPDATE SET
-  vote=excluded.vote, rationale=excluded.rationale, updated_at=excluded.updated_at`,
-		proposalID, member, vote, rationale, time.Now().Unix())
+  vote=excluded.vote, rationale=excluded.rationale,
+  signature=excluded.signature, pubkey=excluded.pubkey,
+  updated_at=excluded.updated_at`,
+		proposalID, member, vote, rationale, signature, pubkey, time.Now().Unix())
 	return err
 }
 
@@ -346,7 +366,7 @@ ON CONFLICT(proposal_id, member) DO UPDATE SET
 func (d *DB) MemberVotesFor(proposalID string) (map[string]MemberVote, error) {
 	out := map[string]MemberVote{}
 	rows, err := d.sql.Query(`
-SELECT member, COALESCE(vote,''), COALESCE(rationale,'')
+SELECT member, COALESCE(vote,''), COALESCE(rationale,''), COALESCE(signature,''), COALESCE(pubkey,'')
 FROM member_votes WHERE proposal_id = ?`, proposalID)
 	if err != nil {
 		return nil, err
@@ -354,7 +374,7 @@ FROM member_votes WHERE proposal_id = ?`, proposalID)
 	defer rows.Close()
 	for rows.Next() {
 		var m MemberVote
-		if err := rows.Scan(&m.Member, &m.Vote, &m.Rationale); err != nil {
+		if err := rows.Scan(&m.Member, &m.Vote, &m.Rationale, &m.Signature, &m.PubKey); err != nil {
 			return nil, err
 		}
 		out[m.Member] = m
@@ -377,7 +397,7 @@ func (d *DB) MemberVotesForAll(ids []string) (map[string]map[string]MemberVote, 
 	}
 
 	rows, err := d.sql.Query(`
-SELECT proposal_id, member, COALESCE(vote,''), COALESCE(rationale,'')
+SELECT proposal_id, member, COALESCE(vote,''), COALESCE(rationale,''), COALESCE(signature,'')
 FROM member_votes
 WHERE proposal_id IN (`+placeholders+`)`, args...)
 	if err != nil {
@@ -388,7 +408,7 @@ WHERE proposal_id IN (`+placeholders+`)`, args...)
 	for rows.Next() {
 		var pid string
 		var m MemberVote
-		if err := rows.Scan(&pid, &m.Member, &m.Vote, &m.Rationale); err != nil {
+		if err := rows.Scan(&pid, &m.Member, &m.Vote, &m.Rationale, &m.Signature); err != nil {
 			return nil, err
 		}
 		if out[pid] == nil {

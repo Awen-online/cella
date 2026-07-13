@@ -70,6 +70,7 @@ func New(db *store.DB, opts Options) *Server {
 	s.mux.HandleFunc("/constitution", s.handleConstitution)
 	s.mux.HandleFunc("/enter", s.handleEnter)
 	s.mux.HandleFunc("/vote", s.handleCastVote)
+	s.mux.HandleFunc("/vote/prepare", s.handleVotePrepare)
 	s.mux.HandleFunc("/auth/member", s.handleMemberLogin)
 	s.mux.HandleFunc("/auth/challenge", s.handleChallenge)
 	s.mux.HandleFunc("/auth/verify", s.handleVerify)
@@ -123,6 +124,10 @@ type actionView struct {
 	YourVote      string
 	YourRationale string
 	YouRecorded   bool
+
+	// YouCanSign is true when the signed-in delegate has a wallet registered in
+	// the roster, and so can sign their position rather than merely assert it.
+	YouCanSign bool
 
 	// CSRF is the anti-forgery token for this session, embedded in every form
 	// that changes state.
@@ -294,6 +299,9 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 			av.YourVote, av.YourRationale, av.YouRecorded = st.Vote, st.Rationale, st.Recorded
 			break
 		}
+	}
+	if m, ok := s.body.ByName(you); ok && m.Address != "" {
+		av.YouCanSign = true
 	}
 
 	// A rationale can only be anchored once someone has written one.
@@ -604,6 +612,12 @@ const detailHTML = `<!doctype html>
   .delib.awaiting { opacity:.5; }
   .dvote.pending { color:var(--muted); border-color:rgba(139,147,184,.3); }
   .drat.none { color:var(--muted); font-style:italic; }
+  .sigtag { font-family:'Cinzel',serif; font-size:9px; letter-spacing:.08em; text-transform:uppercase; border-radius:999px; padding:1px 8px; margin-left:8px; white-space:nowrap; }
+  .sigtag.signed { color:var(--green); border:1px solid rgba(75,189,136,.5); }
+  .sigtag.unsigned { color:var(--muted); border:1px solid rgba(139,147,184,.35); }
+  .signbox { margin-top:12px; padding:10px 13px; border-radius:9px; border:1px dashed rgba(245,210,122,.4); color:var(--muted); font-size:13px; line-height:1.55; }
+  .signbox b { color:var(--goldb); }
+  #vote-msg { color:var(--goldb); font-size:13px; margin-top:9px; min-height:1.2em; }
   .delib-list { display:flex; flex-direction:column; gap:14px; }
   .delib { display:grid; grid-template-columns:76px 1fr; gap:13px; align-items:start; }
   .dvote { font-family:'Cinzel',serif; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; text-align:center; padding:6px 0; border-radius:8px; border:1px solid; }
@@ -676,7 +690,9 @@ const detailHTML = `<!doctype html>
         <div class="dvote pending">—</div>
         {{end}}
         <div>
-          <div class="dname">{{.Member.Name}} <span class="drole">{{.Member.Role}}</span></div>
+          <div class="dname">{{.Member.Name}} <span class="drole">{{.Member.Role}}</span>
+            {{if .Recorded}}{{if .Signed}}<span class="sigtag signed" title="Signed by the delegate's wallet">&#10003; signed</span>{{else}}<span class="sigtag unsigned" title="Recorded from a session, not signed by a wallet">unsigned</span>{{end}}{{end}}
+          </div>
           {{if .Recorded}}
             {{if .Rationale}}<div class="drat">{{.Rationale}}</div>{{else}}<div class="drat none">Recorded without a rationale.</div>{{end}}
           {{else}}
@@ -692,16 +708,28 @@ const detailHTML = `<!doctype html>
   <div class="card" id="your-position">
     <h2>Your position &middot; {{.You}}</h2>
     {{if .YouRecorded}}<div class="castnote">You have recorded this position. Update it any time before the committee submits.</div>{{else}}<div class="castnote">You have not recorded a position on this action yet. Your co-delegates see it as soon as you do.</div>{{end}}
-    <form method="post" action="/vote" class="castform">
+    <form method="post" action="/vote" class="castform" id="castform">
       <input type="hidden" name="slug" value="{{.Slug}}">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="signature" id="vote-sig">
+      <input type="hidden" name="key" id="vote-key">
       <div class="castradios">
         <label class="cr"><input type="radio" name="vote" value="Yes" {{if eq .YourVote "Yes"}}checked{{end}}>Yes</label>
         <label class="cr"><input type="radio" name="vote" value="No" {{if eq .YourVote "No"}}checked{{end}}>No</label>
         <label class="cr"><input type="radio" name="vote" value="Abstain" {{if eq .YourVote "Abstain"}}checked{{end}}>Abstain</label>
       </div>
-      <textarea name="rationale" placeholder="Your rationale (recorded for the body)…">{{.YourRationale}}</textarea>
-      <div><button type="submit" class="cast-btn">{{if .YouRecorded}}Update my position{{else}}Record my position{{end}}</button></div>
+      <textarea name="rationale" id="vote-rationale" placeholder="Your rationale (recorded for the body)…">{{.YourRationale}}</textarea>
+      <div>
+        <button type="submit" class="cast-btn" id="cast-btn">
+          {{if .YouCanSign}}Sign &amp; {{if .YouRecorded}}update{{else}}record{{end}} my position{{else}}{{if .YouRecorded}}Update my position{{else}}Record my position{{end}}{{end}}
+        </button>
+      </div>
+      <div id="vote-msg"></div>
+      {{if .YouCanSign}}
+      <div class="signbox">Your wallet will show you the position you are about to record and ask you to sign it. <b>No funds move.</b> The signature is what makes this position provably yours rather than merely whatever your session said — and the body's split is published in the committee's anchored rationale.</div>
+      {{else}}
+      <div class="signbox">No wallet is registered against your name in the roster, so this position will be recorded <b>unsigned</b> — attributable only to your session. Register a wallet address to sign your positions.</div>
+      {{end}}
     </form>
   </div>
   {{end}}
@@ -729,5 +757,90 @@ const detailHTML = `<!doctype html>
   </div>
 </main>
 <footer>Cella · built &amp; maintained by Awen LLC · Apache-2.0</footer>
+{{if .YouCanSign}}
+<script>
+// Sign the position before recording it. The message is fetched from the server
+// rather than composed here: the server decides what a signature means, and it
+// re-derives the same bytes when it verifies. Anything this script invented
+// would simply fail to verify.
+(function () {
+  var form = document.getElementById('castform');
+  var btn  = document.getElementById('cast-btn');
+  var msg  = document.getElementById('vote-msg');
+  var sigF = document.getElementById('vote-sig');
+  var keyF = document.getElementById('vote-key');
+  var signed = false;
+
+  function chosen() {
+    var r = form.querySelector('input[name=vote]:checked');
+    return r ? r.value : '';
+  }
+  function errText(e) {
+    if (!e) return 'unknown';
+    if (typeof e === 'string') return e;
+    return e.info || e.message || String(e);
+  }
+  function pickWallet() {
+    var keys = Object.keys(window.cardano || {}).filter(function (k) {
+      var w = window.cardano[k];
+      return w && typeof w.enable === 'function' && typeof w.icon !== 'undefined';
+    });
+    return keys.length ? keys[0] : null;
+  }
+
+  form.addEventListener('submit', async function (e) {
+    if (signed) return;            // already signed — let it through
+    e.preventDefault();
+
+    if (!chosen()) { msg.textContent = 'Choose Yes, No or Abstain first.'; return; }
+
+    var key = pickWallet();
+    if (!key) { msg.textContent = 'No Cardano wallet found in this browser. Install Eternl or Lace to sign your position.'; return; }
+
+    btn.disabled = true;
+    try {
+      // Ask the server what, exactly, is being signed.
+      msg.textContent = 'Preparing the position…';
+      var body = new URLSearchParams({
+        slug: form.slug.value,
+        csrf: form.csrf.value,
+        vote: chosen(),
+        rationale: document.getElementById('vote-rationale').value
+      });
+      var prep = await fetch('/vote/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body
+      });
+      if (!prep.ok) {
+        var pe = await prep.json().catch(function () { return {}; });
+        msg.textContent = 'Could not prepare the position (' + (pe.error || prep.status) + ').';
+        btn.disabled = false;
+        return;
+      }
+      var prepared = await prep.json();
+
+      var w = window.cardano[key];
+      msg.textContent = 'Approve the signature in ' + (w.name || key) + '…';
+      var api = await w.enable();
+      var rew = await api.getRewardAddresses();
+      var addr = (rew && rew[0]) || (await api.getUsedAddresses())[0];
+      if (!addr) { msg.textContent = 'Could not read an address from your wallet.'; btn.disabled = false; return; }
+
+      var out = await api.signData(addr, prepared.hex);
+      sigF.value = out.signature;
+      keyF.value = out.key;
+
+      signed = true;
+      msg.textContent = 'Signed. Recording…';
+      form.submit();
+    } catch (err) {
+      msg.textContent = 'Signing cancelled or failed (' + errText(err) + '). Your position was not recorded.';
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
+{{end}}
 </body>
 </html>`
