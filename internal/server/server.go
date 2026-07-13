@@ -12,10 +12,23 @@ import (
 	"github.com/Awen-online/cella/internal/store"
 )
 
+// Options configures the server.
+type Options struct {
+	// Secret signs session cookies and CSRF tokens. Empty means a random key
+	// generated at startup — secure, but sessions do not survive a restart.
+	Secret string
+
+	// Demo enables the entry splash's roster picker, which signs a visitor in as
+	// any delegate with no proof of identity. Never enable it on a reachable
+	// deployment.
+	Demo bool
+}
+
 // Server is Cella's HTTP server.
 type Server struct {
 	db   *store.DB
 	key  []byte // signs session cookies and CSRF tokens
+	demo bool   // the roster picker is available (never in production)
 	mux  *http.ServeMux
 	tpl  *template.Template
 	dtpl *template.Template
@@ -25,13 +38,12 @@ type Server struct {
 	rtpl *template.Template
 }
 
-// New builds a Server backed by db, signing sessions with secret. An empty
-// secret means a random key generated at startup — secure, but sessions do not
-// survive a restart.
-func New(db *store.DB, secret string) *Server {
+// New builds a Server backed by db.
+func New(db *store.DB, opts Options) *Server {
 	s := &Server{
 		db:   db,
-		key:  newKey(secret),
+		key:  newKey(opts.Secret),
+		demo: opts.Demo,
 		mux:  http.NewServeMux(),
 		tpl:  template.Must(template.New("index").Funcs(funcs).Parse(withFonts(indexHTML))),
 		dtpl: template.Must(template.New("detail").Funcs(funcs).Parse(withFonts(detailHTML))),

@@ -65,6 +65,7 @@ configuration (environment):
   CELLA_DB         path to the SQLite database   (default ./cella.db)
   CELLA_ADDR       web server listen address     (default :8080)
   CELLA_SECRET     signs session cookies         (default: random key per start)
+  CELLA_DEMO       enable roster sign-in — NO AUTH; never on a reachable instance
   KOIOS_URL        Koios API base URL            (default https://api.koios.rest/api/v1)
   KOIOS_TOKEN      optional Koios bearer token
   CELLA_LLM_URL    OpenAI-compatible endpoint    (e.g. http://localhost:11434/v1 for Ollama)
@@ -133,9 +134,14 @@ func runServe(cfg config.Config, args []string) error {
 	if cfg.Secret == "" {
 		log.Printf("warning: CELLA_SECRET is not set — using a random session key; sessions will not survive a restart")
 	}
+	if cfg.Demo {
+		log.Printf("WARNING: CELLA_DEMO is set — anyone who can reach this instance may enter as any")
+		log.Printf("WARNING: delegate, cast votes in their name, and author the committee's rationale.")
+		log.Printf("WARNING: Do not expose this instance to a network.")
+	}
 
 	log.Printf("cella %s serving on http://localhost%s", version, *addr)
-	return server.New(db, cfg.Secret).ListenAndServe(*addr)
+	return server.New(db, server.Options{Secret: cfg.Secret, Demo: cfg.Demo}).ListenAndServe(*addr)
 }
 
 func runReview(cfg config.Config, args []string) error {

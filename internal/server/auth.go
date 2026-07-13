@@ -125,8 +125,17 @@ func (s *Server) gate(next http.Handler) http.Handler {
 	})
 }
 
-// handleMemberLogin is the demo fallback: enter as one of the roster members.
+// handleMemberLogin is the demo fallback: enter as one of the roster members,
+// with no proof of identity at all. It is the weakest door in the building —
+// it hands a visitor a session as whichever delegate they name — so it exists
+// only when the operator has explicitly asked for a demo. Refusing here is the
+// control that matters: hiding the picker in the template would still leave the
+// endpoint open to anyone who posts to it directly.
 func (s *Server) handleMemberLogin(w http.ResponseWriter, r *http.Request) {
+	if !s.demo {
+		http.Error(w, "roster sign-in is disabled; authenticate with a wallet", http.StatusForbidden)
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

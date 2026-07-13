@@ -2,15 +2,23 @@ package server
 
 import "net/http"
 
+// enterView is the entry splash: the body, plus whether the roster picker is
+// offered. The roster itself is always shown — it is who the body is — but the
+// "enter as this member" buttons only appear in demo mode.
+type enterView struct {
+	Body
+	Demo bool
+}
+
 // handleEnter renders the entry splash: a branded welcome to the body's private
-// chamber, the member roster, a real wallet sign-in, and a demo fallback.
+// chamber, the member roster, and wallet sign-in.
 func (s *Server) handleEnter(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.member(r); ok {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.etpl.Execute(w, demoBody); err != nil {
+	if err := s.etpl.Execute(w, enterView{Body: demoBody, Demo: s.demo}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -61,6 +69,9 @@ const enterHTML = `<!doctype html>
   .wpick img { width:26px; height:26px; border-radius:6px; flex:0 0 auto; }
   .wpick span { text-transform:capitalize; }
   #wallet-modal .cancel { display:block; margin:14px auto 0; background:none; border:0; color:var(--muted); font-size:13px; cursor:pointer; }
+  .demo-warn { margin-top:26px; padding:12px 16px; border:1px dashed rgba(217,105,95,.55); border-radius:10px; background:rgba(217,105,95,.08); color:#e8a49c; font-size:13.5px; line-height:1.55; text-align:center; }
+  .demo-warn b { color:#f0b8b1; }
+  .demo-warn code { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:12px; color:var(--goldb); }
   a:focus-visible, button:focus-visible { outline:2px solid var(--goldb); outline-offset:3px; }
   footer { color:var(--muted); font-size:12.5px; margin-top:40px; text-align:center; font-family:'JetBrains Mono',ui-monospace,monospace; }
   @media (prefers-reduced-motion:no-preference){ h1.salve{ animation:fade .6s ease both; } @keyframes fade{ from{opacity:0; transform:translateY(6px);} to{opacity:1;} } }
@@ -88,6 +99,12 @@ const enterHTML = `<!doctype html>
       <div class="hint">Sign a challenge with your Cardano wallet to authenticate. <b>No funds move.</b></div>
     </div>
 
+    {{if .Demo}}
+    <div class="demo-warn">
+      <b>Demo mode.</b> Anyone may enter as any delegate below, without proving who they are. Never run a reachable instance this way — unset <code>CELLA_DEMO</code> and sign in with a wallet.
+    </div>
+    {{end}}
+
     <div class="rule"></div>
     <div class="roster-label">The body — {{len .Members}} delegates</div>
     <div class="roster">
@@ -96,10 +113,12 @@ const enterHTML = `<!doctype html>
         <div class="name">{{.Name}}</div>
         <div class="role">{{.Role}}</div>
         <div class="addr">{{.Address}}</div>
+        {{if $.Demo}}
         <form method="post" action="/auth/member">
           <input type="hidden" name="member" value="{{.Name}}">
           <button class="enter" type="submit">Enter as this member (demo)</button>
         </form>
+        {{end}}
       </div>
       {{end}}
     </div>
@@ -124,6 +143,10 @@ const enterHTML = `<!doctype html>
     var modal = document.getElementById('wallet-modal');
     var list = document.getElementById('wallet-list');
     var cancel = document.getElementById('wallet-cancel');
+
+    // Only point people at the roster picker when it is actually there.
+    var DEMO = {{.Demo}};
+    var fallback = DEMO ? ' Enter as a member below.' : ' A wallet is the only way in.';
 
     function errText(e) {
       if (!e) return 'unknown';
@@ -157,15 +180,15 @@ const enterHTML = `<!doctype html>
         });
         if (res.ok) { location.href = '/'; return; }
         var je = await res.json();
-        msg.textContent = 'Sign-in failed (' + (je.error || 'unknown') + '). Enter as a member below.';
+        msg.textContent = 'Sign-in failed (' + (je.error || 'unknown') + ').' + fallback;
       } catch (err) {
-        msg.textContent = 'Sign-in cancelled or failed (' + errText(err) + '). Enter as a member below.';
+        msg.textContent = 'Sign-in cancelled or failed (' + errText(err) + ').' + fallback;
       }
     }
 
     btn.addEventListener('click', function () {
       var ws = wallets();
-      if (!ws.length) { msg.textContent = 'No Cardano wallet found in this browser. Install Eternl/Lace, or enter as a member below.'; return; }
+      if (!ws.length) { msg.textContent = 'No Cardano wallet found in this browser. Install Eternl or Lace.' + fallback; return; }
       if (ws.length === 1) { signIn(ws[0]); return; }
       list.innerHTML = '';
       ws.forEach(function (k) {

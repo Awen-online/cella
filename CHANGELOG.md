@@ -25,6 +25,7 @@ All notable changes to Cella are documented here. The format is based on [Keep a
 - CI now takes its Go version from `go.mod` rather than a separately pinned version, so the two cannot drift apart.
 
 ### Security
+- **Roster sign-in is now off by default**, behind `CELLA_DEMO`. The entry splash's member picker signs a visitor in as whichever delegate they click, with no proof of identity — and it was reachable on every deployment, so anyone who could load the page could vote as any delegate and author the committee's rationale. It is now refused at the endpoint (not merely hidden in the page, which would leave a direct post working), and both the splash and the server log say plainly what demo mode gives away.
 - **Session cookies are signed** (HMAC-SHA256, keyed by `CELLA_SECRET`). The cookie previously carried a delegate's identity in the clear, so anyone could set it to any name on the roster and record votes as that delegate. An unverifiable cookie is now treated as no session at all.
 - **Vote and rationale posts require a CSRF token** bound to the session identity, so a token minted for one delegate cannot authorize a post as another.
 

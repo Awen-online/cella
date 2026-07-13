@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Awen-online/cella/internal/store"
 )
 
 // session returns a signed cookie for identity, as the server would mint it.
@@ -57,7 +60,7 @@ func TestForgedSessionIsRejected(t *testing.T) {
 // decorative.
 func TestSessionDoesNotVerifyUnderAnotherKey(t *testing.T) {
 	s, _ := seedServer(t)
-	other := New(s.db, "a-different-secret")
+	other := New(s.db, Options{Secret: "a-different-secret", Demo: true})
 
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.AddCookie(session(s, "Junia Marcia"))
@@ -161,5 +164,80 @@ func TestCastVoteWithoutSessionRedirects(t *testing.T) {
 	rec := castVote(t, s, slug, "", s.csrfToken("Junia Marcia"))
 	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/enter" {
 		t.Errorf("vote with no session = %d -> %q; want 302 -> /enter", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+// memberLogin posts to the roster picker.
+func memberLogin(t *testing.T, s *Server, name string) *httptest.ResponseRecorder {
+	t.Helper()
+	form := url.Values{"member": {name}}
+	r := httptest.NewRequest(http.MethodPost, "/auth/member", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, r)
+	return rec
+}
+
+// Outside demo mode the roster picker must be refused at the endpoint, not
+// merely hidden in the page. Hiding the buttons would leave anyone who posts
+// directly able to sign in as any delegate — which is the whole hole.
+func TestRosterLoginRefusedOutsideDemo(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	s := New(db, Options{Secret: "test-secret"}) // Demo defaults to false
+
+	rec := memberLogin(t, s, "Junia Marcia")
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("roster sign-in outside demo = %d, want 403", rec.Code)
+	}
+	if cookies := rec.Result().Cookies(); len(cookies) > 0 {
+		t.Errorf("a session cookie was issued anyway: %v", cookies)
+	}
+
+	// And the splash must not advertise a door that is bolted.
+	page := get(t, s, "/enter").Body.String()
+	if strings.Contains(page, "Enter as this member") {
+		t.Error("the entry splash offers roster sign-in while it is disabled")
+	}
+	if strings.Contains(page, "/auth/member") {
+		t.Error("the entry splash still posts to the disabled roster endpoint")
+	}
+}
+
+func TestRosterLoginWorksInDemo(t *testing.T) {
+	s, _ := seedServer(t) // Demo: true
+
+	rec := memberLogin(t, s, "Junia Marcia")
+	if rec.Code != http.StatusFound {
+		t.Fatalf("roster sign-in in demo = %d, want 302", rec.Code)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("demo sign-in issued no session cookie")
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.AddCookie(cookies[0])
+	got, ok := s.member(r)
+	if !ok || got != "Junia Marcia (demo)" {
+		t.Errorf("session = %q, %v; want \"Junia Marcia (demo)\", true", got, ok)
+	}
+
+	// The splash warns that the chamber is standing wide open.
+	page := get(t, s, "/enter").Body.String()
+	if !strings.Contains(page, "Demo mode") {
+		t.Error("demo mode is not flagged on the entry splash")
+	}
+}
+
+// Demo mode must not let a visitor name someone who is not on the roster.
+func TestRosterLoginRejectsUnknownMember(t *testing.T) {
+	s, _ := seedServer(t)
+	rec := memberLogin(t, s, "Mallory")
+	if len(rec.Result().Cookies()) > 0 {
+		t.Error("an off-roster name was issued a session")
 	}
 }
