@@ -58,6 +58,16 @@ CREATE TABLE IF NOT EXISTS member_votes (
   PRIMARY KEY (proposal_id, member)
 );
 
+-- The network's genesis parameters, captured at ingest. They turn a governance
+-- action's expiration epoch into a wall-clock deadline. Storing them keeps the
+-- web server free of network calls.
+CREATE TABLE IF NOT EXISTS network (
+  id           INTEGER PRIMARY KEY CHECK (id = 1),  -- single row
+  system_start INTEGER,
+  epoch_length INTEGER,
+  fetched_at   INTEGER
+);
+
 -- The committee's final, citable rationale for its vote — the body of the
 -- CIP-136 document that is anchored on-chain alongside the vote.
 CREATE TABLE IF NOT EXISTS rationales (
@@ -352,6 +362,43 @@ FROM member_votes WHERE proposal_id = ?`, proposalID)
 	return out, rows.Err()
 }
 
+// MemberVotesForAll returns delegates' internal votes for many actions at once,
+// keyed by proposal_id then member. The index needs a quorum count for every
+// action on the page; querying per action would be a query per row.
+func (d *DB) MemberVotesForAll(ids []string) (map[string]map[string]MemberVote, error) {
+	out := map[string]map[string]MemberVote{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+
+	rows, err := d.sql.Query(`
+SELECT proposal_id, member, COALESCE(vote,''), COALESCE(rationale,'')
+FROM member_votes
+WHERE proposal_id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var pid string
+		var m MemberVote
+		if err := rows.Scan(&pid, &m.Member, &m.Vote, &m.Rationale); err != nil {
+			return nil, err
+		}
+		if out[pid] == nil {
+			out[pid] = map[string]MemberVote{}
+		}
+		out[pid][m.Member] = m
+	}
+	return out, rows.Err()
+}
+
 // MemberVotesByMember returns one member's internal votes across all actions,
 // keyed by proposal_id (for showing "your vote" on the actions index).
 func (d *DB) MemberVotesByMember(member string) (map[string]MemberVote, error) {
@@ -376,6 +423,35 @@ FROM member_votes WHERE member = ?`, member)
 		out[pid] = m
 	}
 	return out, rows.Err()
+}
+
+// SaveNetwork records the network's genesis parameters.
+func (d *DB) SaveNetwork(p koios.GenesisParams) error {
+	_, err := d.sql.Exec(`
+INSERT INTO network (id, system_start, epoch_length, fetched_at)
+VALUES (1, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  system_start=excluded.system_start, epoch_length=excluded.epoch_length,
+  fetched_at=excluded.fetched_at`,
+		p.SystemStart, p.EpochLength, time.Now().Unix())
+	return err
+}
+
+// Network returns the stored genesis parameters. They are absent until an
+// ingest has run, in which case the returned params are not Valid() and callers
+// must fall back to showing the raw expiration epoch rather than inventing a
+// date from nothing.
+func (d *DB) Network() (koios.GenesisParams, error) {
+	var p koios.GenesisParams
+	row := d.sql.QueryRow(`SELECT COALESCE(system_start,0), COALESCE(epoch_length,0) FROM network WHERE id = 1`)
+	err := row.Scan(&p.SystemStart, &p.EpochLength)
+	if err == sql.ErrNoRows {
+		return koios.GenesisParams{}, nil
+	}
+	if err != nil {
+		return koios.GenesisParams{}, err
+	}
+	return p, nil
 }
 
 // Rationale is the committee's authored rationale for its vote on an action —

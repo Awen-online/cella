@@ -47,15 +47,13 @@ func (t tally) Decision() string {
 // Recorded is how many delegates have taken a position.
 func (t tally) Recorded() int { return t.Yes + t.No + t.Abstain }
 
-// tallyFor counts the body's recorded positions on an action. Roster members
-// who have not recorded one are counted as didNotVote — the CIP distinguishes
-// abstaining (a deliberate position) from simply not voting.
-func (s *Server) tallyFor(proposalID string) (tally, []string, error) {
-	votes, err := s.db.MemberVotesFor(proposalID)
-	if err != nil {
-		return tally{}, nil, err
-	}
+// Seats is how many delegates the body has — the denominator for quorum.
+func (t tally) Seats() int { return t.Recorded() + t.DidNotVote }
 
+// tallyFrom counts the body's recorded positions from an already-fetched vote
+// map. Roster members who have not recorded one are counted as didNotVote — the
+// CIP distinguishes abstaining (a deliberate position) from simply not voting.
+func tallyFrom(votes map[string]store.MemberVote) (tally, []string) {
 	var t tally
 	var authors []string
 	for _, m := range demoBody.Members {
@@ -75,6 +73,16 @@ func (s *Server) tallyFor(proposalID string) (tally, []string, error) {
 			t.Abstain++
 		}
 	}
+	return t, authors
+}
+
+// tallyFor counts the body's recorded positions on a single action.
+func (s *Server) tallyFor(proposalID string) (tally, []string, error) {
+	votes, err := s.db.MemberVotesFor(proposalID)
+	if err != nil {
+		return tally{}, nil, err
+	}
+	t, authors := tallyFrom(votes)
 	return t, authors, nil
 }
 

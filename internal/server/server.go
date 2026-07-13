@@ -100,6 +100,9 @@ type actionView struct {
 	// HasRationale is true once the committee's rationale has been authored.
 	HasRationale bool
 
+	// Deadline is when voting closes on this action.
+	Deadline Deadline
+
 	// Full Constitutional Committee roster for this action (all seats; a seat
 	// with Voted=false is shown grayed as awaiting a vote).
 	Committee []CommitteeSeat
@@ -165,6 +168,17 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	chamberVotes, err := s.db.MemberVotesForAll(ids)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	net, err := s.db.Network()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	now := time.Now()
 
 	views := make([]actionView, 0, len(actions))
 	for _, a := range actions {
@@ -184,6 +198,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		}
 		if mv, ok := myVotes[a.ProposalID]; ok {
 			av.YourVote = mv.Vote
+		}
+		av.Tally, _ = tallyFrom(chamberVotes[a.ProposalID])
+		if a.Expiration.Valid {
+			av.Deadline = deadlineFor(a.Expiration.Int64, net, now)
 		}
 		views = append(views, av)
 	}
@@ -276,6 +294,16 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	av.HasRationale = !rat.Empty()
 
+	// The clock. An action that expires unvoted is an accidental abstention.
+	net, err := s.db.Network()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if a.Expiration.Valid {
+		av.Deadline = deadlineFor(a.Expiration.Int64, net, time.Now())
+	}
+
 	// Full committee roster: every seat, voted or awaiting.
 	byCred := make(map[string]store.VoteRow, len(av.Votes))
 	for _, v := range av.Votes {
@@ -349,6 +377,20 @@ const indexHTML = `<!doctype html>
   th { font-family:'Cinzel',serif; color:var(--gold); font-size:12px; letter-spacing:.12em; text-transform:uppercase; }
   td.type { color:var(--goldb); white-space:nowrap; font-size:14px; }
   td.title { color:var(--ivory); }
+  td.dl { white-space:nowrap; }
+  .cd { font-family:'Cinzel',serif; font-size:13px; font-weight:700; letter-spacing:.04em; }
+  .cd.critical { color:var(--red); }
+  .cd.soon { color:var(--goldb); }
+  .cd.ok { color:var(--green); }
+  .cd.expired { color:var(--muted); text-decoration:line-through; }
+  .cd.unknown { color:var(--muted); font-weight:400; }
+  .dlwhen { color:var(--muted); font-size:11.5px; margin-top:3px; }
+  td.quorum { white-space:nowrap; }
+  .qn { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:14px; color:var(--muted); }
+  .qn.part { color:var(--goldb); }
+  .qn.full { color:var(--green); }
+  .qlab { color:var(--muted); font-size:11px; margin-top:2px; }
+  td .muted { color:var(--muted); }
   td.title a.atitle { color:var(--ivory); font-weight:600; text-decoration:none; }
   td.title a.atitle:hover { color:var(--goldb); text-decoration:underline; }
   td.id { font-family:ui-monospace,Consolas,monospace; font-size:12px; color:var(--muted); }
@@ -393,11 +435,22 @@ const indexHTML = `<!doctype html>
   <div class="legend">Constitutionality tags are AI-assisted assessments — the committee decides and signs. Run <code>cella review</code> to generate them with your own model.</div>
   {{if .Actions}}
   <table>
-    <thead><tr><th>Date</th><th>Type</th><th>Action</th><th>Your vote</th><th>CC votes &amp; rationales</th></tr></thead>
+    <thead><tr><th>Deadline</th><th>Chamber</th><th>Type</th><th>Action</th><th>Your vote</th><th>CC votes &amp; rationales</th></tr></thead>
     <tbody>
       {{range .Actions}}
       <tr>
-        <td>{{date .BlockTime}}</td>
+        <td class="dl">
+          {{if .Deadline.Epoch}}
+            <div class="cd {{.Deadline.Urgency}}" {{if .Deadline.Unix}}data-deadline="{{.Deadline.Unix}}"{{end}}>{{if .Deadline.Countdown}}{{.Deadline.Countdown}}{{else}}epoch {{.Deadline.Epoch}}{{end}}</div>
+            <div class="dlwhen">{{.Deadline.When}}</div>
+          {{else}}
+            <span class="muted">—</span>
+          {{end}}
+        </td>
+        <td class="quorum">
+          <span class="qn {{if eq .Tally.Recorded .Tally.Seats}}full{{else if .Tally.Recorded}}part{{end}}">{{.Tally.Recorded}}/{{.Tally.Seats}}</span>
+          <div class="qlab">recorded</div>
+        </td>
         <td class="type">{{.Type}}</td>
         <td class="title">
           <a class="atitle" href="/action/{{.Slug}}">{{if .Title}}{{.Title}}{{else}}(no anchored title){{end}}</a>
@@ -441,6 +494,33 @@ const indexHTML = `<!doctype html>
   {{end}}
 </main>
 <footer>Cella · built &amp; maintained by Awen LLC · Apache-2.0</footer>
+<script>
+// Tick the countdowns so a page left open does not quietly go stale — a stale
+// clock on a governance deadline is worse than no clock.
+(function () {
+  var els = Array.prototype.slice.call(document.querySelectorAll('.cd[data-deadline]'));
+  if (!els.length) return;
+
+  function plural(n, unit) { return n === 1 ? '1 ' + unit : n + ' ' + unit + 's'; }
+
+  function render(el) {
+    var left = (parseInt(el.getAttribute('data-deadline'), 10) * 1000) - Date.now();
+    el.classList.remove('ok', 'soon', 'critical', 'expired');
+    if (left <= 0) { el.textContent = 'expired'; el.classList.add('expired'); return; }
+
+    var mins = left / 60000, hours = mins / 60, days = hours / 24;
+    if (hours < 1)       el.textContent = plural(Math.ceil(mins), 'minute') + ' left';
+    else if (hours < 48) el.textContent = plural(Math.floor(hours), 'hour') + ' left';
+    else                 el.textContent = plural(Math.floor(days), 'day') + ' left';
+
+    el.classList.add(hours < 48 ? 'critical' : (days < 5 ? 'soon' : 'ok'));
+  }
+
+  function tick() { els.forEach(render); }
+  tick();
+  setInterval(tick, 30000);
+})();
+</script>
 </body>
 </html>`
 
@@ -465,6 +545,20 @@ const detailHTML = `<!doctype html>
   .type { color:var(--goldb); font-size:13px; text-transform:uppercase; letter-spacing:.08em; font-family:'Cinzel',serif; }
   .meta { color:var(--muted); font-size:15px; margin-top:8px; line-height:1.65; }
   .meta code { font-family:ui-monospace,Consolas,monospace; color:var(--body); font-size:12px; word-break:break-all; }
+  .deadline { margin-top:12px; padding:10px 14px; border-radius:10px; border:1px solid; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  .deadline .cd { font-family:'Cinzel',serif; font-size:15px; font-weight:700; letter-spacing:.04em; }
+  .deadline .dlwhen { color:var(--muted); font-size:13px; }
+  .deadline .dlnote { color:var(--muted); font-size:12.5px; font-style:italic; flex-basis:100%; }
+  .deadline.critical { border-color:rgba(217,105,95,.5); background:rgba(217,105,95,.08); }
+  .deadline.critical .cd { color:var(--red); }
+  .deadline.soon { border-color:rgba(245,210,122,.45); background:rgba(245,210,122,.06); }
+  .deadline.soon .cd { color:var(--goldb); }
+  .deadline.ok { border-color:rgba(75,189,136,.35); background:rgba(75,189,136,.06); }
+  .deadline.ok .cd { color:var(--green); }
+  .deadline.expired { border-color:rgba(139,147,184,.3); }
+  .deadline.expired .cd { color:var(--muted); }
+  .deadline.unknown { border-color:rgba(139,147,184,.3); }
+  .deadline.unknown .cd { color:var(--muted); font-weight:400; }
   .meta a { color:var(--blue); text-decoration:none; }
   .card { background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:18px 20px; margin-top:20px; }
   .card h2 { font-family:'Cinzel',serif; color:var(--gold); font-size:13px; letter-spacing:.12em; text-transform:uppercase; margin:0 0 10px; }
@@ -530,8 +624,15 @@ const detailHTML = `<!doctype html>
 <main>
   <div class="type">{{.Type}}</div>
   <h1>{{if .Title}}{{.Title}}{{else}}<span class="muted">(no anchored title)</span>{{end}}</h1>
+  {{if .Deadline.Epoch}}
+  <div class="deadline {{.Deadline.Urgency}}">
+    <span class="cd">{{if .Deadline.Countdown}}{{.Deadline.Countdown}}{{else}}expires epoch {{.Deadline.Epoch}}{{end}}</span>
+    <span class="dlwhen">{{.Deadline.When}}</span>
+    {{if and (not .Deadline.Expired) .Deadline.Known}}<span class="dlnote">An action that expires unvoted is an abstention the committee never chose.</span>{{end}}
+  </div>
+  {{end}}
   <div class="meta">
-    Seen {{date .BlockTime}}{{if .Expiration.Valid}} · expires {{date .Expiration.Int64}}{{end}}<br>
+    Seen {{date .BlockTime}}<br>
     <code>{{.ProposalID}}</code>
     <br><a href="https://adastat.net/governances/{{.GovID}}" target="_blank" rel="noopener">View on AdaStat &#8599;</a>
     {{if .MetaURL}}&nbsp;·&nbsp;<a href="{{.MetaURL}}" rel="noopener">Anchor metadata &#8599;</a>{{end}}

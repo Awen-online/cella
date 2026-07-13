@@ -90,6 +90,15 @@ func runIngest(cfg config.Config, args []string) error {
 	ctx := context.Background()
 	kc := koios.New(cfg.KoiosURL, cfg.KoiosToken)
 
+	// The chain states an action's expiration as an epoch number. Capture the
+	// network's genesis parameters so the web UI can turn that into a real
+	// deadline without needing the network itself.
+	if gp, err := kc.Genesis(ctx); err != nil {
+		log.Printf("  warn: genesis parameters: %v (deadlines will show the raw epoch)", err)
+	} else if err := db.SaveNetwork(gp); err != nil {
+		return err
+	}
+
 	actions, err := kc.GovernanceActions(ctx, *limit)
 	if err != nil {
 		return err

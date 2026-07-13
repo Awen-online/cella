@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -111,6 +112,111 @@ func (c *Client) GovernanceActions(ctx context.Context, limit int) ([]Governance
 		return nil, fmt.Errorf("decode proposal_list: %w", err)
 	}
 	return out, nil
+}
+
+// Genesis is the network's genesis configuration, as returned by Koios
+// /genesis. Cella needs it to turn a governance action's expiration — which the
+// chain states as an epoch *number*, not a time — into a wall-clock deadline.
+// The values differ per network (mainnet, Preprod and Preview each have their
+// own), so they are read from the chain rather than hardcoded.
+//
+// Koios is inconsistent about types here: systemstart comes back as a JSON
+// number and epochlength as a quoted string, so both are read leniently.
+type Genesis struct {
+	SystemStart flexInt `json:"systemstart"` // unix seconds at which epoch 0 began
+	EpochLength flexInt `json:"epochlength"` // seconds per epoch
+	NetworkID   string  `json:"networkid"`
+}
+
+// flexInt is an integer that JSON may present either bare or quoted.
+type flexInt int64
+
+func (f *flexInt) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(b)), `"`)
+	if s == "" || s == "null" {
+		return nil
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return err
+	}
+	*f = flexInt(n)
+	return nil
+}
+
+// GenesisParams are the genesis values Cella actually uses.
+type GenesisParams struct {
+	SystemStart int64 // unix seconds at which epoch 0 began
+	EpochLength int64 // seconds per epoch
+}
+
+// Valid reports whether the parameters can be used for epoch arithmetic.
+func (p GenesisParams) Valid() bool { return p.SystemStart > 0 && p.EpochLength > 0 }
+
+// EpochStart is the instant epoch n begins.
+//
+// Byron and Shelley epochs happen to run the same wall-clock length on every
+// Cardano network (the slot length shrank as the slots-per-epoch grew), so a
+// single multiplication from genesis holds across the era boundary. This is not
+// an assumption taken on faith: it reproduces Koios's own slot arithmetic for
+// the current epoch exactly.
+func (p GenesisParams) EpochStart(n int64) time.Time {
+	return time.Unix(p.SystemStart+n*p.EpochLength, 0).UTC()
+}
+
+// EpochEnd is the instant epoch n ends, which is when epoch n+1 begins.
+func (p GenesisParams) EpochEnd(n int64) time.Time { return p.EpochStart(n + 1) }
+
+// Genesis fetches the network's genesis parameters.
+func (c *Client) Genesis(ctx context.Context) (GenesisParams, error) {
+	var p GenesisParams
+
+	body, err := c.get(ctx, c.baseURL+"/genesis")
+	if err != nil {
+		return p, err
+	}
+
+	var out []Genesis
+	if err := json.Unmarshal(body, &out); err != nil {
+		return p, fmt.Errorf("decode genesis: %w", err)
+	}
+	if len(out) == 0 {
+		return p, fmt.Errorf("koios returned no genesis parameters")
+	}
+
+	p = GenesisParams{
+		SystemStart: int64(out[0].SystemStart),
+		EpochLength: int64(out[0].EpochLength),
+	}
+	if !p.Valid() {
+		return GenesisParams{}, fmt.Errorf(
+			"genesis parameters are not usable (systemstart=%d epochlength=%d)", p.SystemStart, p.EpochLength)
+	}
+	return p, nil
+}
+
+// get performs an authenticated GET and returns the body.
+func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("koios %s: %s", resp.Status, strings.TrimSpace(string(b)))
+	}
+	return io.ReadAll(resp.Body)
 }
 
 // Vote is a single on-chain vote cast on a governance action. VoterRole is one
