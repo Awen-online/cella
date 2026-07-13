@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/Awen-online/cella/internal/cardano"
 	"github.com/Awen-online/cella/internal/config"
@@ -157,6 +158,17 @@ func syncVotingGroup(ctx context.Context, kc *koios.Client, db *store.DB, addr s
 	return nil
 }
 
+// browseURL turns a listen address into one you can actually click. A bare
+// ":8080" listens on every interface, so localhost is the sensible thing to
+// offer; an address that already names a host should be left alone rather than
+// having "localhost" glued to the front of it.
+func browseURL(addr string) string {
+	if strings.HasPrefix(addr, ":") {
+		return "http://localhost" + addr
+	}
+	return "http://" + addr
+}
+
 func runServe(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", cfg.Addr, "listen address")
@@ -189,7 +201,7 @@ func runServe(cfg config.Config, args []string) error {
 		log.Printf("WARNING: Do not expose this instance to a network.")
 	}
 
-	log.Printf("cella %s serving on http://localhost%s", version, *addr)
+	log.Printf("cella %s serving on %s", version, browseURL(*addr))
 	return server.New(db, server.Options{
 		Secret: cfg.Secret,
 		Demo:   cfg.Demo,
