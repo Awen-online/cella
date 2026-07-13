@@ -5,14 +5,25 @@ package config
 import (
 	"os"
 	"strings"
+
+	"github.com/Awen-online/cella/internal/network"
 )
 
 // Config holds Cella's runtime settings.
 type Config struct {
 	DBPath     string // path to the SQLite database file
 	Addr       string // web server listen address
-	KoiosURL   string // Koios API base URL
 	KoiosToken string // optional Koios bearer token
+
+	// Network is the Cardano network this instance runs against: mainnet,
+	// preprod or preview. It picks the Koios endpoint and the explorer links,
+	// so a committee practising on a testnet is on that testnet everywhere —
+	// not merely in the data, with its explorer links still pointing at mainnet.
+	Network network.Network
+
+	// KoiosURL overrides the endpoint Network would choose. For a private or
+	// self-hosted Koios instance.
+	KoiosURL string
 
 	// Secret keys the session cookies. When empty a random key is generated at
 	// startup, which is secure but ephemeral: sessions do not survive a restart.
@@ -51,12 +62,20 @@ type Config struct {
 	LLMKey   string // optional (local models need none)
 }
 
-// Load reads configuration from the environment, applying defaults.
-func Load() Config {
-	return Config{
+// Load reads configuration from the environment, applying defaults. An
+// unrecognised network is an error rather than a silent fall back to mainnet:
+// an operator who meant to practise on a testnet and quietly ended up on
+// mainnet would be voting for real.
+func Load() (Config, error) {
+	net, err := network.Parse(os.Getenv("CELLA_NETWORK"))
+	if err != nil {
+		return Config{}, err
+	}
+
+	c := Config{
+		Network:    net,
 		DBPath:     env("CELLA_DB", "cella.db"),
 		Addr:       env("CELLA_ADDR", ":8080"),
-		KoiosURL:   env("KOIOS_URL", "https://api.koios.rest/api/v1"),
 		KoiosToken: os.Getenv("KOIOS_TOKEN"),
 		Secret:     os.Getenv("CELLA_SECRET"),
 		Demo:       truthy(os.Getenv("CELLA_DEMO")),
@@ -66,6 +85,11 @@ func Load() Config {
 		LLMModel:   os.Getenv("CELLA_LLM_MODEL"),
 		LLMKey:     os.Getenv("CELLA_LLM_KEY"),
 	}
+
+	// KOIOS_URL, when given, wins — a private Koios is a legitimate thing to
+	// have. Otherwise the network decides.
+	c.KoiosURL = env("KOIOS_URL", net.KoiosURL())
+	return c, nil
 }
 
 func env(key, def string) string {

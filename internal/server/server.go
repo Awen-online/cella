@@ -14,6 +14,7 @@ import (
 
 	"github.com/Awen-online/cella/internal/govaction"
 	"github.com/Awen-online/cella/internal/koios"
+	"github.com/Awen-online/cella/internal/network"
 	"github.com/Awen-online/cella/internal/store"
 )
 
@@ -31,14 +32,20 @@ type Options struct {
 	// Body is the delegate roster. The zero value falls back to the placeholder
 	// roster, whose addresses cannot authenticate anyone.
 	Body Body
+
+	// Network is the chain this instance runs against. It decides where the
+	// explorer links point — an instance on a testnet whose links still went to
+	// mainnet would send a delegate to check an action that does not exist there.
+	Network network.Network
 }
 
 // Server is Cella's HTTP server.
 type Server struct {
 	db   *store.DB
-	key  []byte // signs session cookies and CSRF tokens
-	demo bool   // the roster picker is available (never in production)
-	body Body   // the delegate roster
+	key  []byte          // signs session cookies and CSRF tokens
+	demo bool            // the roster picker is available (never in production)
+	body Body            // the delegate roster
+	net  network.Network // the chain this instance runs against
 	mux  *http.ServeMux
 	tpl  *template.Template
 	dtpl *template.Template
@@ -54,11 +61,16 @@ func New(db *store.DB, opts Options) *Server {
 	if len(body.Members) == 0 {
 		body = placeholderBody
 	}
+	net := opts.Network
+	if net == "" {
+		net = network.Mainnet
+	}
 	s := &Server{
 		db:   db,
 		key:  newKey(opts.Secret),
 		demo: opts.Demo,
 		body: body,
+		net:  net,
 		mux:  http.NewServeMux(),
 		tpl:  template.Must(template.New("index").Funcs(funcs).Parse(withFonts(indexHTML))),
 		dtpl: template.Must(template.Must(template.Must(
@@ -179,6 +191,10 @@ type actionView struct {
 	Flags []FlagView
 	Draft string
 
+	// Explorer is where this action can be inspected on-chain, on the network
+	// this instance actually runs against.
+	Explorer string
+
 	// CSRF is the anti-forgery token for this session, embedded in every form
 	// that changes state.
 	CSRF string
@@ -200,6 +216,12 @@ type idxView struct {
 	Body    Body
 	Member  string
 	Actions []actionView
+
+	// Testnet says, loudly, that nothing here is real governance. A committee
+	// practising on a testnet and a committee voting on mainnet look identical
+	// from the inside, and only one of them counts.
+	Testnet bool
+	Network string
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -268,6 +290,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			av.YourVote = mv.Vote
 		}
 		av.Tally, _ = tallyFrom(chamberVotes[a.ProposalID], s.body)
+		av.Explorer = s.net.ExplorerAction(a.GovID())
 
 		// The clock only means something while the action is still open. Running
 		// a countdown on one the chain enacted last month is a lie, and running
@@ -284,7 +307,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	slices.SortStableFunc(views, byUrgency)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tpl.Execute(w, idxView{Body: s.body, Member: m, Actions: views}); err != nil {
+	if err := s.tpl.Execute(w, idxView{
+		Body: s.body, Member: m, Actions: views,
+		Testnet: s.net.IsTestnet(), Network: s.net.Label(),
+	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -398,6 +424,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 
 	// What the action actually does, and how the rest of the ecosystem is
 	// voting on it.
+	av.Explorer = s.net.ExplorerAction(a.GovID())
 	av.Payload, av.HasPayload = a.Payload()
 	av.Summary, av.HasSummary = a.Summary()
 	av.MotivationHTML = mdHTML(a.Motivation)
@@ -525,6 +552,8 @@ const indexHTML = `<!doctype html>
   header a.blink:hover { color:var(--goldb); }
   header .cella-by { margin-left:auto; color:var(--muted); font-size:11px; font-family:'Cinzel',serif; letter-spacing:.1em; text-transform:uppercase; }
   header .cella-by b { color:var(--gold); letter-spacing:.06em; }
+  .testnet { border:1px dashed rgba(111,147,255,.6); background:rgba(111,147,255,.08); color:#a9c0ff; border-radius:10px; padding:11px 16px; margin-bottom:18px; font-size:14px; line-height:1.5; }
+  .testnet b { color:#cfdcff; font-family:'Cinzel',serif; font-size:12px; letter-spacing:.08em; text-transform:uppercase; }
   .bodycard { background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:16px 20px; margin-bottom:22px; }
   .bc-h { font-family:'Cinzel',serif; color:var(--gold); font-size:11px; letter-spacing:.12em; text-transform:uppercase; margin-bottom:14px; }
   .bc-people { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:14px; }
@@ -615,6 +644,11 @@ const indexHTML = `<!doctype html>
   </div>
 </header>
 <main>
+  {{if .Testnet}}
+  <div class="testnet">
+    <b>{{.Network}} &mdash; a testnet.</b> Nothing recorded here is real governance. Positions, rationales and votes on this instance are practice.
+  </div>
+  {{end}}
   <div class="bodycard">
     <div class="bc-h">{{if .Body.Solo}}The member{{else}}The body &mdash; {{.Body.Display}}{{end}}</div>
     <div class="bc-people">
@@ -654,7 +688,7 @@ const indexHTML = `<!doctype html>
         <td class="type">{{.Type}}</td>
         <td class="title">
           <a class="atitle" href="/action/{{.Slug}}">{{if .Title}}{{.Title}}{{else}}(no anchored title){{end}}</a>
-          <div class="id">{{short .ProposalID}} · <a href="https://adastat.net/governances/{{.GovID}}" target="_blank" rel="noopener">AdaStat &#8599;</a></div>
+          <div class="id">{{short .ProposalID}} · <a href="{{.Explorer}}" target="_blank" rel="noopener">Explorer &#8599;</a></div>
           {{if .HasReview}}
           <div class="review">
             <span class="pill {{.Review.Verdict}}">AI · {{.Review.Verdict}}</span>
@@ -958,7 +992,7 @@ const detailHTML = `<!doctype html>
     Seen {{date .BlockTime}}{{if .ProposedEpoch.Valid}} · proposed epoch {{.ProposedEpoch.Int64}}{{end}}{{if .Deposit}} · deposit &#8371;{{depositADA .Deposit}}{{end}}<br>
     <code>{{.ProposalID}}</code>
     {{if .ReturnAddress}}<br>Proposer (deposit returns to) <code>{{.ReturnAddress}}</code>{{end}}
-    <br><a href="https://adastat.net/governances/{{.GovID}}" target="_blank" rel="noopener">View on AdaStat &#8599;</a>
+    <br><a href="{{.Explorer}}" target="_blank" rel="noopener">View on the explorer &#8599;</a>
     {{if .MetaURL}}&nbsp;·&nbsp;<a href="{{.MetaURL}}" rel="noopener">Anchor metadata &#8599;</a>{{end}}
   </div>
 

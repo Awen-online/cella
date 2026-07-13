@@ -129,8 +129,8 @@ func (s *Server) docFor(a store.ActionRow) (rationale.Doc, store.Rationale, erro
 		},
 		{
 			Type:  "Other",
-			Label: "Governance action on AdaStat",
-			URI:   "https://adastat.net/governances/" + a.GovID(),
+			Label: "The governance action on a block explorer",
+			URI:   s.net.ExplorerAction(a.GovID()),
 		},
 	}
 

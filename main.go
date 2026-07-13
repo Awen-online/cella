@@ -66,10 +66,12 @@ func main() {
 		os.Exit(2)
 	}
 
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
 	cmd, args := os.Args[1], os.Args[2:]
 
-	var err error
 	switch cmd {
 	case "ingest":
 		err = runIngest(cfg, args)
@@ -98,13 +100,14 @@ usage:
   cella version   print the version
 
 configuration (environment):
+  CELLA_NETWORK    mainnet | preprod | preview   (default mainnet)
   CELLA_DB         path to the SQLite database   (default ./cella.db)
   CELLA_ADDR       web server listen address     (default :8080)
   CELLA_SECRET     signs session cookies         (default: random key per start)
   CELLA_DEMO       enable roster sign-in — NO AUTH; never on a reachable instance
   CELLA_BODY       path to the body's JSON (who this instance belongs to; logo alongside)
   CELLA_HOT_NFT_ADDR  hot NFT script address — its datum sets the voting group + quorum
-  KOIOS_URL        Koios API base URL            (default https://api.koios.rest/api/v1)
+  KOIOS_URL        override the network's Koios endpoint (for a private instance)
   KOIOS_TOKEN      optional Koios bearer token
   CELLA_LLM_URL    OpenAI-compatible endpoint    (e.g. http://localhost:11434/v1 for Ollama)
   CELLA_LLM_MODEL  model name                    (e.g. gpt-4o-mini, llama3.1)
@@ -127,6 +130,7 @@ func runIngest(cfg config.Config, args []string) error {
 
 	ctx := context.Background()
 	kc := koios.New(cfg.KoiosURL, cfg.KoiosToken)
+	log.Printf("network: %s — %s", cfg.Network.Label(), cfg.KoiosURL)
 
 	// The chain states an action's expiration as an epoch number. Capture the
 	// network's genesis parameters so the web UI can turn that into a real
@@ -329,11 +333,18 @@ func runServe(cfg config.Config, args []string) error {
 		log.Printf("WARNING: Do not expose this instance to a network.")
 	}
 
+	if cfg.Network.IsTestnet() {
+		log.Printf("network: %s — a TESTNET. Votes cast here are practice, not governance.", cfg.Network.Label())
+	} else {
+		log.Printf("network: mainnet")
+	}
+
 	log.Printf("cella %s serving on %s", version, browseURL(*addr))
 	return server.New(db, server.Options{
-		Secret: cfg.Secret,
-		Demo:   cfg.Demo,
-		Body:   body,
+		Secret:  cfg.Secret,
+		Demo:    cfg.Demo,
+		Body:    body,
+		Network: cfg.Network,
 	}).ListenAndServe(*addr)
 }
 

@@ -34,7 +34,10 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("CELLA_ROSTER", "")
 	t.Setenv("CELLA_HOT_NFT_ADDR", "")
 
-	c := Load()
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 	if c.DBPath != "cella.db" {
 		t.Errorf("DBPath = %q, want cella.db", c.DBPath)
 	}
@@ -62,7 +65,10 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	t.Setenv("CELLA_BODY", "body/curia.json")
 	t.Setenv("CELLA_HOT_NFT_ADDR", "addr1w_hot")
 
-	c := Load()
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 	if c.DBPath != "/tmp/x.db" || c.Addr != "127.0.0.1:9000" {
 		t.Errorf("db/addr not read from the environment: %+v", c)
 	}
@@ -71,5 +77,49 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 	if c.Secret != "s3cret" || c.BodyPath != "body/curia.json" || c.HotNFTAddr != "addr1w_hot" {
 		t.Errorf("config not read from the environment: %+v", c)
+	}
+}
+
+// An unrecognised network must be an error, never a silent fall back to
+// mainnet. An operator who meant to practise on a testnet and quietly ended up
+// on mainnet would be voting for real.
+func TestUnknownNetworkIsRefused(t *testing.T) {
+	for _, bad := range []string{"mainet", "testnet", "prod", "sanchonet"} {
+		t.Setenv("CELLA_NETWORK", bad)
+		if _, err := Load(); err == nil {
+			t.Errorf("CELLA_NETWORK=%q was accepted; want an error rather than a silent mainnet", bad)
+		}
+	}
+}
+
+// The network picks the Koios endpoint, unless an operator overrides it with a
+// private instance.
+func TestNetworkPicksKoios(t *testing.T) {
+	t.Setenv("KOIOS_URL", "")
+
+	t.Setenv("CELLA_NETWORK", "preprod")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.KoiosURL != "https://preprod.koios.rest/api/v1" {
+		t.Errorf("preprod Koios = %q", c.KoiosURL)
+	}
+	if !c.Network.IsTestnet() {
+		t.Error("preprod did not report itself a testnet")
+	}
+
+	t.Setenv("CELLA_NETWORK", "")
+	c, _ = Load()
+	if c.KoiosURL != "https://api.koios.rest/api/v1" || c.Network.IsTestnet() {
+		t.Errorf("default is not mainnet: %+v", c)
+	}
+
+	// A private Koios wins over the network's default.
+	t.Setenv("CELLA_NETWORK", "preprod")
+	t.Setenv("KOIOS_URL", "http://localhost:8053/api/v1")
+	c, _ = Load()
+	if c.KoiosURL != "http://localhost:8053/api/v1" {
+		t.Errorf("KOIOS_URL override ignored: %q", c.KoiosURL)
 	}
 }

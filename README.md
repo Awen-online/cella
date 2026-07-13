@@ -91,7 +91,8 @@ Everything is by environment; every value has a sensible default. See [`.env.exa
 | `CELLA_BODY` | Path to the body JSON — **who this instance belongs to**. A consortium or a single member; both are supported. Its logo sits as a file alongside it. See [`body/curia.json`](body/curia.json). Cella recognises a member by hashing the public key in their wallet signature and matching it against their registered address, so **a member with no address cannot sign in.** Unset, Cella uses the built-in Cardano Curia body. |
 | `CELLA_HOT_NFT_ADDR` | The hot NFT script address. Its inline datum names the voting group, and therefore what quorum actually is. Cella reads this from the chain rather than trusting local config — without it, quorum is reported as unknown rather than guessed. |
 | `CELLA_DEMO` | **Disables authentication.** Enables the roster picker. Local demos only. |
-| `KOIOS_URL` | Koios API base URL. Point it at a Preprod/Preview instance to work against testnets. |
+| `CELLA_NETWORK` | `mainnet` (default), `preprod` or `preview`. Picks the Koios endpoint **and** the explorer links, so a committee practising on a testnet is on that testnet everywhere. An unrecognised name is a startup error, never a silent mainnet. **SanchoNet is not supported** — Koios does not serve it; governance is live on Preprod. |
+| `KOIOS_URL` | Override the network's Koios endpoint, for a private instance. |
 | `KOIOS_TOKEN` | Optional Koios bearer token (higher rate limits). |
 | `CELLA_LLM_URL` / `CELLA_LLM_MODEL` / `CELLA_LLM_KEY` | Bring-your-own model for `cella review`. |
 
