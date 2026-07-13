@@ -1,0 +1,9 @@
+{
+  "name": "A. N. Other",
+  "kind": "Constitutional Committee member",
+  "blurb": "An independent Constitutional Committee member.",
+
+  "members": [
+    { "name": "A. N. Other", "role": "Constitutional Committee member", "handle": "@anothercc", "address": "", "voteKeyHash": "" }
+  ]
+}

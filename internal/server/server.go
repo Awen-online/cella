@@ -52,7 +52,7 @@ type Server struct {
 func New(db *store.DB, opts Options) *Server {
 	body := opts.Body
 	if len(body.Members) == 0 {
-		body = demoBody
+		body = placeholderBody
 	}
 	s := &Server{
 		db:   db,
@@ -338,7 +338,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	// The chamber: every delegate's recorded position, and where that leaves the
 	// body. Nothing here is inferred — a delegate who has not voted shows as
 	// awaiting.
-	av.BodyName = s.body.Name
+	av.BodyName = s.body.Display()
 	av.Deliberation, err = s.chamber(a.ProposalID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

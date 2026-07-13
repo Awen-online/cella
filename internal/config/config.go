@@ -26,11 +26,16 @@ type Config struct {
 	// committee's rationale.
 	Demo bool
 
-	// RosterPath points at a JSON file describing the body's delegates: their
-	// names, roles, wallet addresses (how Cella recognises them at sign-in) and
-	// on-chain voting key hashes. Without it Cella uses a placeholder roster,
-	// whose addresses are not real and so can authenticate nobody.
-	RosterPath string
+	// BodyPath points at the JSON file describing who this Cella instance
+	// belongs to: the consortium or single member holding the Constitutional
+	// Committee seat, their logo (a file alongside it), and their members —
+	// names, handles, wallet addresses (how Cella recognises them at sign-in),
+	// and on-chain voting key hashes.
+	//
+	// Without it Cella serves a placeholder that is deliberately nobody. An
+	// instance that quietly impersonated a consortium it is not would be worse
+	// than one that admits it has not been told who it is.
+	BodyPath string
 
 	// HotNFTAddr is the script address holding the committee's hot NFT. Its
 	// inline datum names the voting group — who may sign the committee's vote —
@@ -38,12 +43,6 @@ type Config struct {
 	// rather than trusting local configuration, because the validator, not
 	// Cella, decides whether a vote transaction is accepted.
 	HotNFTAddr string
-
-	// LogoPath is a file on disk — the body's own mark. Cella serves it itself
-	// rather than letting the page hot-link it: the Content-Security-Policy is
-	// img-src 'self', and a governance tool should not go dark because someone
-	// else's server did.
-	LogoPath string
 
 	// Constitutionality review — bring your own model. Any OpenAI-compatible
 	// endpoint (OpenAI, OpenRouter, Groq, vLLM, LM Studio, local Ollama).
@@ -61,9 +60,8 @@ func Load() Config {
 		KoiosToken: os.Getenv("KOIOS_TOKEN"),
 		Secret:     os.Getenv("CELLA_SECRET"),
 		Demo:       truthy(os.Getenv("CELLA_DEMO")),
-		RosterPath: os.Getenv("CELLA_ROSTER"),
+		BodyPath:   env("CELLA_BODY", os.Getenv("CELLA_ROSTER")), // CELLA_ROSTER: the old name
 		HotNFTAddr: os.Getenv("CELLA_HOT_NFT_ADDR"),
-		LogoPath:   os.Getenv("CELLA_LOGO"),
 		LLMURL:     os.Getenv("CELLA_LLM_URL"),
 		LLMModel:   os.Getenv("CELLA_LLM_MODEL"),
 		LLMKey:     os.Getenv("CELLA_LLM_KEY"),

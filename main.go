@@ -8,11 +8,13 @@ package main
 
 import (
 	"context"
+	"embed"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/Awen-online/cella/internal/cardano"
 	"github.com/Awen-online/cella/internal/config"
@@ -24,6 +26,38 @@ import (
 )
 
 const version = "0.0.1"
+
+// The body Cella ships with, compiled in so a fresh clone runs with no
+// configuration at all. It is the same body/curia.json an operator would edit —
+// one source of truth, readable on disk and embedded in the binary, rather than
+// a Go struct that drifts away from the JSON beside it.
+//
+//go:embed body/curia.json body/curia-logo.svg
+var builtinBody embed.FS
+
+// loadBody resolves who this instance belongs to: the file CELLA_BODY names, or
+// the built-in Curia body when it names none.
+func loadBody(path string) (server.Body, string, error) {
+	if path != "" {
+		b, err := server.LoadBody(path)
+		return b, path, err
+	}
+
+	data, err := builtinBody.ReadFile("body/curia.json")
+	if err != nil {
+		return server.Body{}, "", err
+	}
+	b, err := server.ParseBody(data, "the built-in body")
+	if err != nil {
+		return server.Body{}, "", err
+	}
+	logo, err := builtinBody.ReadFile("body/curia-logo.svg")
+	if err != nil {
+		return server.Body{}, "", err
+	}
+	b.SetLogo(logo, "image/svg+xml")
+	return b, "built-in", nil
+}
 
 func main() {
 	log.SetFlags(0)
@@ -68,9 +102,8 @@ configuration (environment):
   CELLA_ADDR       web server listen address     (default :8080)
   CELLA_SECRET     signs session cookies         (default: random key per start)
   CELLA_DEMO       enable roster sign-in — NO AUTH; never on a reachable instance
-  CELLA_ROSTER     path to the delegate roster JSON (default: placeholder roster)
+  CELLA_BODY       path to the body's JSON (who this instance belongs to; logo alongside)
   CELLA_HOT_NFT_ADDR  hot NFT script address — its datum sets the voting group + quorum
-  CELLA_LOGO       path to the body's logo file (served by Cella, not hot-linked)
   KOIOS_URL        Koios API base URL            (default https://api.koios.rest/api/v1)
   KOIOS_TOKEN      optional Koios bearer token
   CELLA_LLM_URL    OpenAI-compatible endpoint    (e.g. http://localhost:11434/v1 for Ollama)
@@ -133,40 +166,97 @@ func runIngest(cfg config.Config, args []string) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("%d governance actions (%d written). Fetching votes and voting summaries for each…",
+		len(actions), na)
 
 	// For each action, pull its on-chain votes and keep the CC ones, plus the
 	// stake-weighted tally across every voter role. A committee weighing
 	// constitutionality should know how the DReps and SPOs are voting — not to
 	// follow them, but to know what it is agreeing or disagreeing with.
-	votesTotal, summaries := 0, 0
-	for _, a := range actions {
-		votes, err := kc.ProposalVotes(ctx, a.ProposalID)
-		if err != nil {
-			log.Printf("  warn: votes for %s: %v", a.ProposalID, err)
+	//
+	// That is two Koios calls per action, and a hundred actions run serially is
+	// several silent minutes — long enough that an operator reasonably concludes
+	// it has hung. So: fetch concurrently, and say what is happening while it
+	// happens. Writes stay on this goroutine, because SQLite would rather they
+	// did.
+	type result struct {
+		id      string
+		title   string
+		votes   []koios.Vote
+		summary koios.VotingSummary
+		hasSum  bool
+		err     error
+	}
+
+	const workers = 6 // enough to be quick, few enough to be a good Koios citizen
+	jobs := make(chan koios.GovernanceAction)
+	out := make(chan result)
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for a := range jobs {
+				r := result{id: a.ProposalID, title: a.Title()}
+				if r.votes, r.err = kc.ProposalVotes(ctx, a.ProposalID); r.err == nil {
+					r.summary, r.hasSum, r.err = kc.ProposalVotingSummary(ctx, a.ProposalID)
+				}
+				out <- r
+			}
+		}()
+	}
+	go func() {
+		for _, a := range actions {
+			jobs <- a
+		}
+		close(jobs)
+		wg.Wait()
+		close(out)
+	}()
+
+	votesTotal, summaries, done := 0, 0, 0
+	for r := range out {
+		done++
+		if r.err != nil {
+			log.Printf("  [%d/%d] %s — %v", done, len(actions), short(r.title, r.id), r.err)
 			continue
 		}
-		nv, err := db.UpsertVotes(a.ProposalID, votes)
+		nv, err := db.UpsertVotes(r.id, r.votes)
 		if err != nil {
 			return err
 		}
 		votesTotal += nv
 
-		sum, ok, err := kc.ProposalVotingSummary(ctx, a.ProposalID)
-		if err != nil {
-			log.Printf("  warn: voting summary for %s: %v", a.ProposalID, err)
-			continue
-		}
-		if ok {
-			if err := db.SaveVotingSummary(a.ProposalID, sum); err != nil {
+		if r.hasSum {
+			if err := db.SaveVotingSummary(r.id, r.summary); err != nil {
 				return err
 			}
 			summaries++
 		}
+		log.Printf("  [%d/%d] %s — %d CC votes%s",
+			done, len(actions), short(r.title, r.id), nv, map[bool]string{true: ", voting summary"}[r.hasSum])
 	}
 
-	log.Printf("ingested %d governance actions (%d written), %d CC votes and %d voting summaries into %s",
+	log.Printf("done: %d governance actions (%d written), %d CC votes and %d voting summaries in %s",
 		len(actions), na, votesTotal, summaries, cfg.DBPath)
 	return nil
+}
+
+// short names an action for a progress line: its title, or its id when the
+// anchor carried no title.
+func short(title, id string) string {
+	if title == "" {
+		if len(id) > 24 {
+			return id[:24] + "…"
+		}
+		return id
+	}
+	r := []rune(title)
+	if len(r) > 48 {
+		return string(r[:48]) + "…"
+	}
+	return title
 }
 
 // syncVotingGroup reads the hot NFT's inline datum and records who the chain
@@ -211,17 +301,23 @@ func runServe(cfg config.Config, args []string) error {
 	}
 	defer db.Close()
 
-	body, err := server.LoadBody(cfg.RosterPath)
+	body, source, err := loadBody(cfg.BodyPath)
 	if err != nil {
 		return err
 	}
-	if cfg.LogoPath != "" {
-		server.SetLogo(cfg.LogoPath)
+	log.Printf("body: %s — %d member(s), from %s", body.Name, len(body.Members), source)
+
+	// A member with no registered wallet address cannot sign in. Say so at
+	// startup rather than leaving them to discover it at the door.
+	var unregistered int
+	for _, m := range body.Members {
+		if m.Address == "" {
+			unregistered++
+		}
 	}
-	if cfg.RosterPath == "" {
-		log.Printf("warning: CELLA_ROSTER is not set — using the built-in roster; no wallet can sign in")
-	} else {
-		log.Printf("body: %s (%d member(s))", body.Name, len(body.Members))
+	if unregistered > 0 {
+		log.Printf("warning: %d of %d member(s) have no wallet address in %s and cannot sign in",
+			unregistered, len(body.Members), source)
 	}
 
 	if cfg.Secret == "" {

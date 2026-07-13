@@ -1,0 +1,18 @@
+{
+  "name": "Cardano Curia",
+  "short": "The Curia",
+  "kind": "Constitutional Committee member",
+  "blurb": "A consortium that deliberates on Cardano governance actions, assesses their constitutionality, and casts a single committee vote with a shared rationale.",
+
+  "logo": "curia-logo.svg",
+  "website": "https://www.cardanocuria.com",
+  "x": "https://x.com/cardanocuria",
+
+  "members": [
+    { "name": "James Meidinger",  "role": "Member", "handle": "@blockjock65",   "address": "", "voteKeyHash": "" },
+    { "name": "Mladen Lamesevic", "role": "Member", "handle": "@MladenLm",      "address": "", "voteKeyHash": "" },
+    { "name": "Sheldon Hunt",     "role": "Member", "handle": "@SundialSheldon","address": "", "voteKeyHash": "" },
+    { "name": "Ian McCullough",   "role": "Member", "handle": "@CullahMusic",   "address": "addr1q8ejkg9t0tkqxkms3nqe2e90rgdn680mg9vfq5ygd06j94d0xdpt8x0tr7mpserrhsssmh0d8ug7494ndwr53rcs3veq6dulc9", "voteKeyHash": "" },
+    { "name": "Kris Kowalsky",    "role": "Member", "handle": "@KrisKowalsky",  "address": "", "voteKeyHash": "" }
+  ]
+}

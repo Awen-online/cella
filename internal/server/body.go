@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Awen-online/cella/internal/cardano"
@@ -62,17 +63,27 @@ type Body struct {
 	Kind  string `json:"kind"`            // "Constitutional Committee member"
 	Blurb string `json:"blurb"`
 
-	// Logo is a same-origin path Cella serves. It cannot be an external URL:
-	// the Content-Security-Policy is img-src 'self', deliberately, and a
-	// governance tool should not be loading its own identity from someone else's
-	// server. Point CELLA_LOGO at a file on disk and Cella will serve it here.
+	// Logo is a filename, resolved relative to this config file — the mark sits
+	// next to the JSON that describes the body. Cella reads it and serves it
+	// itself; it is never an external URL. The Content-Security-Policy is
+	// img-src 'self' deliberately, because a page that can load images from
+	// anywhere leaks which governance actions a committee is reading to whoever
+	// hosts them — and a self-hostable tool should not go dark because someone
+	// else's server did.
 	Logo string `json:"logo,omitempty"`
+
+	// LogoData is the mark itself, read from Logo at load. Not configuration.
+	LogoData []byte `json:"-"`
+	LogoMIME string `json:"-"`
 
 	Website string `json:"website,omitempty"`
 	X       string `json:"x,omitempty"` // the body's own X profile
 
 	Members []Member `json:"members"`
 }
+
+// HasLogo reports whether the body brought its own mark.
+func (b Body) HasLogo() bool { return len(b.LogoData) > 0 }
 
 // Solo reports whether the body is a single member rather than a consortium.
 // A one-person committee member is common, and "1 delegates" is not a thing.
@@ -86,22 +97,18 @@ func (b Body) Display() string {
 	return b.Name
 }
 
-// LoadBody reads a body from a JSON file. An empty path yields the placeholder.
-func LoadBody(path string) (Body, error) {
-	if path == "" {
-		return demoBody, nil
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return Body{}, fmt.Errorf("read roster: %w", err)
-	}
-
+// ParseBody reads a body from JSON. It does not load the logo, which needs to
+// be resolved against wherever the JSON came from.
+func ParseBody(data []byte, source string) (Body, error) {
 	var body Body
-	if err := json.Unmarshal(b, &body); err != nil {
-		return Body{}, fmt.Errorf("parse roster %s: %w", path, err)
+	if err := json.Unmarshal(data, &body); err != nil {
+		return Body{}, fmt.Errorf("parse %s: %w", source, err)
+	}
+	if body.Name == "" {
+		return Body{}, fmt.Errorf("%s: the body has no name", source)
 	}
 	if len(body.Members) == 0 {
-		return Body{}, fmt.Errorf("roster %s lists no members", path)
+		return Body{}, fmt.Errorf("%s lists no members", source)
 	}
 
 	// Fail loudly at startup rather than silently at sign-in: a member whose
@@ -109,16 +116,68 @@ func LoadBody(path string) (Body, error) {
 	// they try to vote is far too late.
 	for i, m := range body.Members {
 		if m.Name == "" {
-			return Body{}, fmt.Errorf("roster %s: member %d has no name", path, i)
+			return Body{}, fmt.Errorf("%s: member %d has no name", source, i)
 		}
 		if m.Address == "" {
 			continue // a member may be listed before they register a wallet
 		}
 		if _, err := cardano.Credentials(m.Address); err != nil {
-			return Body{}, fmt.Errorf("roster %s: %s has an unusable address: %w", path, m.Name, err)
+			return Body{}, fmt.Errorf("%s: %s has an unusable address: %w", source, m.Name, err)
 		}
 	}
 	return body, nil
+}
+
+// LoadBody reads a body from a JSON file, and its logo from alongside it.
+func LoadBody(path string) (Body, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Body{}, fmt.Errorf("read body: %w", err)
+	}
+
+	body, err := ParseBody(data, path)
+	if err != nil {
+		return Body{}, err
+	}
+
+	// The mark sits next to the config that names it.
+	if body.Logo != "" {
+		logo := body.Logo
+		if !filepath.IsAbs(logo) {
+			logo = filepath.Join(filepath.Dir(path), logo)
+		}
+		raw, err := os.ReadFile(logo)
+		if err != nil {
+			return Body{}, fmt.Errorf("%s names a logo it does not have: %w", path, err)
+		}
+		body.SetLogo(raw, MIMEFor(logo))
+	}
+	return body, nil
+}
+
+// SetLogo attaches the body's mark.
+func (b *Body) SetLogo(data []byte, mime string) {
+	b.LogoData, b.LogoMIME = data, mime
+	if len(data) > 0 {
+		b.Logo = "/brand/logo" // the path the page will ask Cella for
+	}
+}
+
+// MIMEFor guesses an image type from its extension. A logo is one of a handful
+// of things and none of them need content sniffing.
+func MIMEFor(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".svg":
+		return "image/svg+xml"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 // ByCredential finds the member whose registered address carries the given key
@@ -155,25 +214,15 @@ func (b Body) ByName(name string) (Member, bool) {
 	return Member{}, false
 }
 
-// demoBody is the roster used when no CELLA_ROSTER is configured: Cardano Curia,
-// the consortium Cella is built for.
-//
-// The wallet addresses are deliberately absent. Nobody here can sign in until a
-// real roster registers their address, so an unconfigured deployment cannot
-// authenticate anybody by accident.
-var demoBody = Body{
-	Name:    "Cardano Curia",
-	Short:   "The Curia",
-	Kind:    "Constitutional Committee member",
-	Blurb:   "A consortium that deliberates on Cardano governance actions, assesses their constitutionality, and casts a single committee vote with a shared rationale.",
-	Logo:    "/brand/logo",
-	Website: "https://www.cardanocuria.com",
-	X:       "https://x.com/cardanocuria",
+// placeholderBody is what Cella falls back to when no body is configured. It is
+// deliberately nobody: a real deployment must say who it is, and an instance
+// that quietly impersonates a consortium it is not would be worse than one that
+// admits it has not been told.
+var placeholderBody = Body{
+	Name:  "An unconfigured body",
+	Kind:  "Constitutional Committee member",
+	Blurb: "No body is configured. Point CELLA_BODY at a body.json — see body/curia.json for a worked example — so this chamber knows whose it is.",
 	Members: []Member{
-		{Name: "James Meidinger", Role: "Member", Handle: "@blockjock65"},
-		{Name: "Mladen Lamesevic", Role: "Member", Handle: "@MladenLm"},
-		{Name: "Sheldon Hunt", Role: "Member", Handle: "@SundialSheldon"},
-		{Name: "Ian McCullough", Role: "Member", Handle: "@CullahMusic"},
-		{Name: "Kris Kowalsky", Role: "Member", Handle: "@KrisKowalsky"},
+		{Name: "No members configured", Role: "Set CELLA_BODY"},
 	},
 }

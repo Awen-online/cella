@@ -162,7 +162,7 @@ func TestDownloadJSONLD(t *testing.T) {
 	if iv["constitutional"] != float64(1) || iv["unconstitutional"] != float64(1) || iv["abstain"] != float64(0) {
 		t.Errorf("internalVote = %v, want 1 constitutional / 1 unconstitutional / 0 abstain", iv)
 	}
-	if want := float64(len(demoBody.Members) - 2); iv["didNotVote"] != want {
+	if want := float64(len(testBody.Members) - 2); iv["didNotVote"] != want {
 		t.Errorf("didNotVote = %v, want %v (roster members with no recorded position)", iv["didNotVote"], want)
 	}
 
@@ -249,7 +249,7 @@ func TestTallyForCountsRoster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tallyFor: %v", err)
 	}
-	want := tally{Yes: 1, Abstain: 1, DidNotVote: len(demoBody.Members) - 2}
+	want := tally{Yes: 1, Abstain: 1, DidNotVote: len(testBody.Members) - 2}
 	if got != want {
 		t.Errorf("tallyFor = %+v, want %+v", got, want)
 	}

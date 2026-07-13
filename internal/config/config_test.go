@@ -30,6 +30,7 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("KOIOS_URL", "")
 	t.Setenv("CELLA_DEMO", "")
 	t.Setenv("CELLA_SECRET", "")
+	t.Setenv("CELLA_BODY", "")
 	t.Setenv("CELLA_ROSTER", "")
 	t.Setenv("CELLA_HOT_NFT_ADDR", "")
 
@@ -48,7 +49,7 @@ func TestLoadDefaults(t *testing.T) {
 	if c.Demo {
 		t.Error("Demo defaults to true; authentication must be on unless asked otherwise")
 	}
-	if c.Secret != "" || c.RosterPath != "" || c.HotNFTAddr != "" {
+	if c.Secret != "" || c.BodyPath != "" || c.HotNFTAddr != "" {
 		t.Errorf("secrets/paths should default empty, got %+v", c)
 	}
 }
@@ -58,7 +59,7 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	t.Setenv("CELLA_ADDR", "127.0.0.1:9000")
 	t.Setenv("CELLA_DEMO", "yes")
 	t.Setenv("CELLA_SECRET", "s3cret")
-	t.Setenv("CELLA_ROSTER", "roster.json")
+	t.Setenv("CELLA_BODY", "body/curia.json")
 	t.Setenv("CELLA_HOT_NFT_ADDR", "addr1w_hot")
 
 	c := Load()
@@ -68,7 +69,7 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	if !c.Demo {
 		t.Error("CELLA_DEMO=yes did not enable demo mode")
 	}
-	if c.Secret != "s3cret" || c.RosterPath != "roster.json" || c.HotNFTAddr != "addr1w_hot" {
+	if c.Secret != "s3cret" || c.BodyPath != "body/curia.json" || c.HotNFTAddr != "addr1w_hot" {
 		t.Errorf("config not read from the environment: %+v", c)
 	}
 }

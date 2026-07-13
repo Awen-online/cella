@@ -73,7 +73,7 @@ This enables a roster picker on the entry splash that signs you in as any delega
 
 ```bash
 export CELLA_SECRET=$(openssl rand -hex 32)   # signs session cookies
-export CELLA_ROSTER=roster.json               # your delegates — see roster.example.json
+export CELLA_BODY=body/curia.json             # who you are — see body/curia.json
 export CELLA_HOT_NFT_ADDR=addr1w...           # the committee's hot NFT script address
 
 ./cella ingest && ./cella serve
@@ -88,7 +88,7 @@ Everything is by environment; every value has a sensible default. See [`.env.exa
 | `CELLA_DB` | SQLite database path (default `./cella.db`) |
 | `CELLA_ADDR` | Listen address (default `:8080`) |
 | `CELLA_SECRET` | **Signs session cookies.** Unset means a random key per start — secure, but every restart signs everyone out. Set it for any persistent deployment. |
-| `CELLA_ROSTER` | Path to the delegate roster JSON. Cella recognises a delegate by hashing the public key in their wallet signature and matching it against their registered address. **Without a roster, nobody can sign in.** |
+| `CELLA_BODY` | Path to the body JSON — **who this instance belongs to**. A consortium or a single member; both are supported. Its logo sits as a file alongside it. See [`body/curia.json`](body/curia.json). Cella recognises a member by hashing the public key in their wallet signature and matching it against their registered address, so **a member with no address cannot sign in.** Unset, Cella uses the built-in Cardano Curia body. |
 | `CELLA_HOT_NFT_ADDR` | The hot NFT script address. Its inline datum names the voting group, and therefore what quorum actually is. Cella reads this from the chain rather than trusting local config — without it, quorum is reported as unknown rather than guessed. |
 | `CELLA_DEMO` | **Disables authentication.** Enables the roster picker. Local demos only. |
 | `KOIOS_URL` | Koios API base URL. Point it at a Preprod/Preview instance to work against testnets. |

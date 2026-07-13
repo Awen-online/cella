@@ -53,7 +53,7 @@ func TestMemberLink(t *testing.T) {
 // Both shipped examples must actually load — an example roster that does not
 // parse is worse than none, because it is the thing an operator copies.
 func TestExampleRostersLoad(t *testing.T) {
-	for _, name := range []string{"roster.example.json", "roster.solo.example.json"} {
+	for _, name := range []string{"body/curia.json", "body/solo.example.json"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", name)
 			if _, err := os.Stat(path); err != nil {
@@ -78,7 +78,7 @@ func TestExampleRostersLoad(t *testing.T) {
 	}
 
 	// The solo example must actually be solo, or it is not demonstrating the case.
-	b, err := LoadBody(filepath.Join("..", "..", "roster.solo.example.json"))
+	b, err := LoadBody(filepath.Join("..", "..", "body/solo.example.json"))
 	if err == nil && !b.Solo() {
 		t.Error("the solo example roster is not a solo body")
 	}
