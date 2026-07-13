@@ -57,11 +57,55 @@ go build -o cella .
 ./cella serve       # then open http://localhost:8080
 ```
 
-That's the whole install. Configuration is optional and by environment (see [`.env.example`](.env.example)): `CELLA_DB`, `CELLA_ADDR`, `CELLA_SECRET`, `KOIOS_URL`, `KOIOS_TOKEN`. Point `KOIOS_URL` at a Preprod/Preview instance to work against testnets.
+That's the whole install. No API key is required — Koios is a public, decentralized Cardano query layer.
 
-Set `CELLA_SECRET` for any deployment you intend to keep running: it signs the session cookies that carry a delegate's identity. Left unset, Cella generates a random key at startup — secure, but every restart signs everyone out.
+### Try it without a wallet
 
-No API key is required. Koios is a public, decentralized Cardano query layer.
+Wallet sign-in is the only way into a real instance, so to look around locally without one, run in demo mode:
+
+```bash
+CELLA_DEMO=1 ./cella serve
+```
+
+This enables a roster picker on the entry splash that signs you in as any delegate you click, **with no proof of identity at all**. It exists to demonstrate the chamber. Never set it on an instance anyone else can reach: a stranger could vote in a delegate's name and author the committee's rationale, which is then anchored on-chain and cited permanently.
+
+### Running it for real
+
+```bash
+export CELLA_SECRET=$(openssl rand -hex 32)   # signs session cookies
+export CELLA_ROSTER=roster.json               # your delegates — see roster.example.json
+export CELLA_HOT_NFT_ADDR=addr1w...           # the committee's hot NFT script address
+
+./cella ingest && ./cella serve
+```
+
+### Configuration
+
+Everything is by environment; every value has a sensible default. See [`.env.example`](.env.example) for the full annotated list.
+
+| Variable | What it does |
+|---|---|
+| `CELLA_DB` | SQLite database path (default `./cella.db`) |
+| `CELLA_ADDR` | Listen address (default `:8080`) |
+| `CELLA_SECRET` | **Signs session cookies.** Unset means a random key per start — secure, but every restart signs everyone out. Set it for any persistent deployment. |
+| `CELLA_ROSTER` | Path to the delegate roster JSON. Cella recognises a delegate by hashing the public key in their wallet signature and matching it against their registered address. **Without a roster, nobody can sign in.** |
+| `CELLA_HOT_NFT_ADDR` | The hot NFT script address. Its inline datum names the voting group, and therefore what quorum actually is. Cella reads this from the chain rather than trusting local config — without it, quorum is reported as unknown rather than guessed. |
+| `CELLA_DEMO` | **Disables authentication.** Enables the roster picker. Local demos only. |
+| `KOIOS_URL` | Koios API base URL. Point it at a Preprod/Preview instance to work against testnets. |
+| `KOIOS_TOKEN` | Optional Koios bearer token (higher rate limits). |
+| `CELLA_LLM_URL` / `CELLA_LLM_MODEL` / `CELLA_LLM_KEY` | Bring-your-own model for `cella review`. |
+
+## Tests
+
+```bash
+go test ./...            # the whole suite
+go test ./... -cover     # with coverage
+```
+
+Two of these are worth knowing about, because they are what stop Cella from lying to a committee:
+
+- **`internal/rationale`** hashes CIP-136's *own published example document* and asserts it reproduces the file hash the CIP publishes for it. If that fails, every anchor hash Cella produces is wrong.
+- **`internal/cardano`** decodes a *real* credential-manager hot NFT datum — one whose blake2b-256 is the inline datum hash IntersectMBO publishes — and pins the quorum rule at `ceil(n/2)`, so a group of four needs two signatures rather than the intuitive three.
 
 ## Part of the Awen ecosystem
 

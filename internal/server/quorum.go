@@ -1,9 +1,6 @@
 package server
 
-import (
-	"github.com/Awen-online/cella/internal/cardano"
-	"github.com/Awen-online/cella/internal/store"
-)
+import "github.com/Awen-online/cella/internal/store"
 
 // Quorum is what the chain requires to accept the committee's vote, set against
 // what the body has actually produced.
@@ -85,6 +82,3 @@ func signedBy(votes map[string]store.MemberVote, name string) bool {
 	v, ok := votes[name]
 	return ok && v.Signed()
 }
-
-// votingGroupFor is a small helper for templates that want the raw group.
-func (s *Server) votingGroup() (cardano.VotingGroup, error) { return s.db.VotingGroup() }

@@ -68,6 +68,7 @@ configuration (environment):
   CELLA_SECRET     signs session cookies         (default: random key per start)
   CELLA_DEMO       enable roster sign-in — NO AUTH; never on a reachable instance
   CELLA_ROSTER     path to the delegate roster JSON (default: placeholder roster)
+  CELLA_HOT_NFT_ADDR  hot NFT script address — its datum sets the voting group + quorum
   KOIOS_URL        Koios API base URL            (default https://api.koios.rest/api/v1)
   KOIOS_TOKEN      optional Koios bearer token
   CELLA_LLM_URL    OpenAI-compatible endpoint    (e.g. http://localhost:11434/v1 for Ollama)
