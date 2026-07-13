@@ -19,8 +19,21 @@ It runs standalone (no WordPress required), so any Constitutional Committee or c
 - **Constitutionality review** , connect to large language models and other tooling to assess whether a governance action aligns with the Cardano Constitution.
 - **Deliberation** , structured discussion among committee / consortium members.
 - **Internal voting** , members vote internally to settle the committee's position.
-- **Rationale** , author the committee's final, citable rationale for its vote.
+- **Rationale** , author the committee's final, citable rationale for its vote as a [CIP-136](https://github.com/cardano-foundation/CIPs/tree/master/CIP-0136) document, with the real on-chain anchor hash.
 - **On-chain submission** , package the vote and rationale and submit them on-chain.
+
+## The rationale is a real artifact
+
+Cella's committee rationale is not a preview or a mock-up. Authoring one produces a genuine CIP-136 JSON-LD document, downloadable at `/rationale/{action}.jsonld`, and Cella shows you its **anchor hash** — the blake2b-256 of exactly those bytes, and precisely the value that goes on-chain with the vote:
+
+```bash
+cardano-cli hash anchor-data --file-text rationale-<action>.jsonld
+# prints the same hash Cella displays
+```
+
+The document's `internalVote` block is filled from the chamber's own deliberation: each delegate voting Yes counts as *constitutional*, No as *unconstitutional*, and roster members who never took a position as *didNotVote* — which is how a multi-member committee shows the chain that its single vote came out of a real internal split. Delegates who recorded a position are named as the document's authors.
+
+Cella will not hand you a document that CIP-136 would reject: an anchor hash over an incomplete rationale looks submittable when it isn't, so the download is refused until the rationale is complete.
 
 ## Who it's for
 
@@ -44,9 +57,55 @@ go build -o cella .
 ./cella serve       # then open http://localhost:8080
 ```
 
-That's the whole install. Configuration is optional and by environment (see [`.env.example`](.env.example)): `CELLA_DB`, `CELLA_ADDR`, `KOIOS_URL`, `KOIOS_TOKEN`. Point `KOIOS_URL` at a Preprod/Preview instance to work against testnets.
+That's the whole install. No API key is required — Koios is a public, decentralized Cardano query layer.
 
-No API key is required. Koios is a public, decentralized Cardano query layer.
+### Try it without a wallet
+
+Wallet sign-in is the only way into a real instance, so to look around locally without one, run in demo mode:
+
+```bash
+CELLA_DEMO=1 ./cella serve
+```
+
+This enables a roster picker on the entry splash that signs you in as any delegate you click, **with no proof of identity at all**. It exists to demonstrate the chamber. Never set it on an instance anyone else can reach: a stranger could vote in a delegate's name and author the committee's rationale, which is then anchored on-chain and cited permanently.
+
+### Running it for real
+
+```bash
+export CELLA_SECRET=$(openssl rand -hex 32)   # signs session cookies
+export CELLA_ROSTER=roster.json               # your delegates — see roster.example.json
+export CELLA_HOT_NFT_ADDR=addr1w...           # the committee's hot NFT script address
+
+./cella ingest && ./cella serve
+```
+
+### Configuration
+
+Everything is by environment; every value has a sensible default. See [`.env.example`](.env.example) for the full annotated list.
+
+| Variable | What it does |
+|---|---|
+| `CELLA_DB` | SQLite database path (default `./cella.db`) |
+| `CELLA_ADDR` | Listen address (default `:8080`) |
+| `CELLA_SECRET` | **Signs session cookies.** Unset means a random key per start — secure, but every restart signs everyone out. Set it for any persistent deployment. |
+| `CELLA_ROSTER` | Path to the delegate roster JSON. Cella recognises a delegate by hashing the public key in their wallet signature and matching it against their registered address. **Without a roster, nobody can sign in.** |
+| `CELLA_HOT_NFT_ADDR` | The hot NFT script address. Its inline datum names the voting group, and therefore what quorum actually is. Cella reads this from the chain rather than trusting local config — without it, quorum is reported as unknown rather than guessed. |
+| `CELLA_DEMO` | **Disables authentication.** Enables the roster picker. Local demos only. |
+| `KOIOS_URL` | Koios API base URL. Point it at a Preprod/Preview instance to work against testnets. |
+| `KOIOS_TOKEN` | Optional Koios bearer token (higher rate limits). |
+| `CELLA_LLM_URL` / `CELLA_LLM_MODEL` / `CELLA_LLM_KEY` | Bring-your-own model for `cella review`. |
+
+## Tests
+
+```bash
+go test ./...            # the whole suite
+go test ./... -cover     # with coverage
+```
+
+Two of these are worth knowing about, because they are what stop Cella from lying to a committee:
+
+- **`internal/rationale`** hashes CIP-136's *own published example document* and asserts it reproduces the file hash the CIP publishes for it. If that fails, every anchor hash Cella produces is wrong.
+- **`internal/cardano`** decodes a *real* credential-manager hot NFT datum — one whose blake2b-256 is the inline datum hash IntersectMBO publishes — and pins the quorum rule at `ceil(n/2)`, so a group of four needs two signatures rather than the intuitive three.
 
 ## Part of the Awen ecosystem
 

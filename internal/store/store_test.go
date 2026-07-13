@@ -144,3 +144,81 @@ func TestUpsertReviewRoundTrip(t *testing.T) {
 		t.Error("absent proposal should have no review")
 	}
 }
+
+func TestRationaleRoundTrip(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	if _, ok, err := db.RationaleFor("gov_action1"); err != nil || ok {
+		t.Fatalf("RationaleFor(unauthored) = ok:%v err:%v; want ok:false err:nil", ok, err)
+	}
+
+	want := Rationale{
+		Summary:         "The committee finds the withdrawal constitutional.",
+		Statement:       "The request is proportionate and within the treasury guardrails.",
+		Precedent:       "Consistent with the Ouroboros Leios withdrawal.",
+		Counterargument: "The amount is large relative to prior awards.",
+		Conclusion:      "Approved.",
+		AuthoredBy:      "Junia Marcia",
+	}
+	if err := db.UpsertRationale("gov_action1", want); err != nil {
+		t.Fatalf("UpsertRationale: %v", err)
+	}
+
+	got, ok, err := db.RationaleFor("gov_action1")
+	if err != nil || !ok {
+		t.Fatalf("RationaleFor = ok:%v err:%v; want ok:true", ok, err)
+	}
+	if got.Summary != want.Summary || got.Statement != want.Statement ||
+		got.Precedent != want.Precedent || got.Counterargument != want.Counterargument ||
+		got.Conclusion != want.Conclusion || got.AuthoredBy != want.AuthoredBy {
+		t.Errorf("rationale did not round-trip:\n got %+v\nwant %+v", got, want)
+	}
+	if got.UpdatedAt == 0 {
+		t.Error("UpdatedAt was not stamped")
+	}
+	if got.Empty() {
+		t.Error("an authored rationale reports itself Empty()")
+	}
+
+	// A second author revising it replaces the text rather than adding a row.
+	revised := want
+	revised.Summary = "On reflection, unconstitutional."
+	revised.AuthoredBy = "Cullah"
+	if err := db.UpsertRationale("gov_action1", revised); err != nil {
+		t.Fatalf("UpsertRationale (revision): %v", err)
+	}
+	got, _, err = db.RationaleFor("gov_action1")
+	if err != nil {
+		t.Fatalf("RationaleFor: %v", err)
+	}
+	if got.Summary != revised.Summary || got.AuthoredBy != "Cullah" {
+		t.Errorf("revision did not replace the rationale: %+v", got)
+	}
+
+	// Rationales are per-action, not global.
+	if _, ok, _ := db.RationaleFor("gov_action2"); ok {
+		t.Error("a rationale authored for one action leaked to another")
+	}
+}
+
+func TestRationaleEmpty(t *testing.T) {
+	cases := map[string]struct {
+		r    Rationale
+		want bool
+	}{
+		"nothing authored":                       {Rationale{}, true},
+		"whitespace only":                        {Rationale{Summary: "  ", Statement: "\n\t"}, true},
+		"summary only":                           {Rationale{Summary: "s"}, false},
+		"statement only":                         {Rationale{Statement: "s"}, false},
+		"conclusion but no summary or statement": {Rationale{Conclusion: "Approved."}, true},
+	}
+	for name, tc := range cases {
+		if got := tc.r.Empty(); got != tc.want {
+			t.Errorf("%s: Empty() = %v, want %v", name, got, tc.want)
+		}
+	}
+}

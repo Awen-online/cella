@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Awen-online/cella/internal/cardano"
 	"github.com/Awen-online/cella/internal/koios"
 
 	_ "modernc.org/sqlite"
@@ -57,6 +58,40 @@ CREATE TABLE IF NOT EXISTS member_votes (
   updated_at  INTEGER,
   PRIMARY KEY (proposal_id, member)
 );
+
+-- The network's genesis parameters, captured at ingest. They turn a governance
+-- action's expiration epoch into a wall-clock deadline. Storing them keeps the
+-- web server free of network calls.
+CREATE TABLE IF NOT EXISTS network (
+  id           INTEGER PRIMARY KEY CHECK (id = 1),  -- single row
+  system_start INTEGER,
+  epoch_length INTEGER,
+  fetched_at   INTEGER
+);
+
+-- The hot NFT datum's voting group: who the chain will accept vote signatures
+-- from, and therefore what quorum actually is. Read from the chain at ingest,
+-- never invented locally — a quorum Cella computed for itself could disagree
+-- with the validator, which is worse than showing none.
+CREATE TABLE IF NOT EXISTS voting_group (
+  key_hash  TEXT PRIMARY KEY,
+  cert_hash TEXT,
+  position  INTEGER,
+  synced_at INTEGER
+);
+
+-- The committee's final, citable rationale for its vote — the body of the
+-- CIP-136 document that is anchored on-chain alongside the vote.
+CREATE TABLE IF NOT EXISTS rationales (
+  proposal_id      TEXT PRIMARY KEY,
+  summary          TEXT,        -- <= 300 chars (CIP-136)
+  statement        TEXT,        -- the full rationale (markdown)
+  precedent        TEXT,
+  counterargument  TEXT,
+  conclusion       TEXT,
+  authored_by      TEXT,        -- the delegate who last edited it
+  updated_at       INTEGER
+);
 `
 
 // DB wraps the SQLite connection.
@@ -73,12 +108,17 @@ func Open(path string) (*DB, error) {
 		sdb.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
-	// Idempotent upgrade for databases created before the abstract column;
-	// a duplicate-column error just means it is already present.
-	if _, err := sdb.Exec(`ALTER TABLE governance_actions ADD COLUMN abstract TEXT`); err != nil &&
-		!strings.Contains(err.Error(), "duplicate column") {
-		// Non-fatal: a fresh database already has the column.
-		_ = err
+	// Idempotent upgrades for databases created before a column existed; a
+	// duplicate-column error just means it is already present.
+	for _, stmt := range []string{
+		`ALTER TABLE governance_actions ADD COLUMN abstract TEXT`,
+		`ALTER TABLE member_votes ADD COLUMN signature TEXT`,
+		`ALTER TABLE member_votes ADD COLUMN pubkey TEXT`,
+	} {
+		if _, err := sdb.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			// Non-fatal: a fresh database already has the column.
+			_ = err
+		}
 	}
 	return &DB{sql: sdb}, nil
 }
@@ -302,20 +342,35 @@ ON CONFLICT(proposal_id) DO UPDATE SET
 }
 
 // MemberVote is a body delegate's internal position on an action.
+//
+// Signature and PubKey are present when the delegate signed the position with
+// their wallet, which is what makes it attributable to them rather than merely
+// to whoever held their session. An unsigned vote is still a vote — a demo
+// instance has no wallets — but the two are never conflated in the UI.
 type MemberVote struct {
 	Member    string
 	Vote      string
 	Rationale string
+	Signature string // hex COSE_Sign1 over the vote message, or ""
+	PubKey    string // hex COSE_Key of the signer, or ""
 }
 
+// Signed reports whether the delegate signed this position with their wallet.
+func (m MemberVote) Signed() bool { return m.Signature != "" }
+
 // UpsertMemberVote records (or replaces) a delegate's internal vote + rationale.
-func (d *DB) UpsertMemberVote(proposalID, member, vote, rationale string) error {
+// A signature (which may be empty) is stored with it: re-recording a position
+// without signing replaces the signature too, because a signature over an old
+// position says nothing about the new one.
+func (d *DB) UpsertMemberVote(proposalID, member, vote, rationale, signature, pubkey string) error {
 	_, err := d.sql.Exec(`
-INSERT INTO member_votes (proposal_id, member, vote, rationale, updated_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO member_votes (proposal_id, member, vote, rationale, signature, pubkey, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(proposal_id, member) DO UPDATE SET
-  vote=excluded.vote, rationale=excluded.rationale, updated_at=excluded.updated_at`,
-		proposalID, member, vote, rationale, time.Now().Unix())
+  vote=excluded.vote, rationale=excluded.rationale,
+  signature=excluded.signature, pubkey=excluded.pubkey,
+  updated_at=excluded.updated_at`,
+		proposalID, member, vote, rationale, signature, pubkey, time.Now().Unix())
 	return err
 }
 
@@ -323,7 +378,7 @@ ON CONFLICT(proposal_id, member) DO UPDATE SET
 func (d *DB) MemberVotesFor(proposalID string) (map[string]MemberVote, error) {
 	out := map[string]MemberVote{}
 	rows, err := d.sql.Query(`
-SELECT member, COALESCE(vote,''), COALESCE(rationale,'')
+SELECT member, COALESCE(vote,''), COALESCE(rationale,''), COALESCE(signature,''), COALESCE(pubkey,'')
 FROM member_votes WHERE proposal_id = ?`, proposalID)
 	if err != nil {
 		return nil, err
@@ -331,10 +386,47 @@ FROM member_votes WHERE proposal_id = ?`, proposalID)
 	defer rows.Close()
 	for rows.Next() {
 		var m MemberVote
-		if err := rows.Scan(&m.Member, &m.Vote, &m.Rationale); err != nil {
+		if err := rows.Scan(&m.Member, &m.Vote, &m.Rationale, &m.Signature, &m.PubKey); err != nil {
 			return nil, err
 		}
 		out[m.Member] = m
+	}
+	return out, rows.Err()
+}
+
+// MemberVotesForAll returns delegates' internal votes for many actions at once,
+// keyed by proposal_id then member. The index needs a quorum count for every
+// action on the page; querying per action would be a query per row.
+func (d *DB) MemberVotesForAll(ids []string) (map[string]map[string]MemberVote, error) {
+	out := map[string]map[string]MemberVote{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+
+	rows, err := d.sql.Query(`
+SELECT proposal_id, member, COALESCE(vote,''), COALESCE(rationale,''), COALESCE(signature,'')
+FROM member_votes
+WHERE proposal_id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var pid string
+		var m MemberVote
+		if err := rows.Scan(&pid, &m.Member, &m.Vote, &m.Rationale, &m.Signature); err != nil {
+			return nil, err
+		}
+		if out[pid] == nil {
+			out[pid] = map[string]MemberVote{}
+		}
+		out[pid][m.Member] = m
 	}
 	return out, rows.Err()
 }
@@ -363,6 +455,139 @@ FROM member_votes WHERE member = ?`, member)
 		out[pid] = m
 	}
 	return out, rows.Err()
+}
+
+// SaveNetwork records the network's genesis parameters.
+func (d *DB) SaveNetwork(p koios.GenesisParams) error {
+	_, err := d.sql.Exec(`
+INSERT INTO network (id, system_start, epoch_length, fetched_at)
+VALUES (1, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  system_start=excluded.system_start, epoch_length=excluded.epoch_length,
+  fetched_at=excluded.fetched_at`,
+		p.SystemStart, p.EpochLength, time.Now().Unix())
+	return err
+}
+
+// Network returns the stored genesis parameters. They are absent until an
+// ingest has run, in which case the returned params are not Valid() and callers
+// must fall back to showing the raw expiration epoch rather than inventing a
+// date from nothing.
+func (d *DB) Network() (koios.GenesisParams, error) {
+	var p koios.GenesisParams
+	row := d.sql.QueryRow(`SELECT COALESCE(system_start,0), COALESCE(epoch_length,0) FROM network WHERE id = 1`)
+	err := row.Scan(&p.SystemStart, &p.EpochLength)
+	if err == sql.ErrNoRows {
+		return koios.GenesisParams{}, nil
+	}
+	if err != nil {
+		return koios.GenesisParams{}, err
+	}
+	return p, nil
+}
+
+// SaveVotingGroup replaces the stored voting group with what the chain says.
+// It is a replacement, not a merge: a delegate rotated out of the hot NFT datum
+// must disappear from Cella too, or Cella would keep counting a signature the
+// validator no longer accepts.
+func (d *DB) SaveVotingGroup(g cardano.VotingGroup) error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM voting_group`); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`
+INSERT INTO voting_group (key_hash, cert_hash, position, synced_at) VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	now := time.Now().Unix()
+	for i, id := range g {
+		if _, err := stmt.Exec(id.KeyHash, id.CertHash, i, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// VotingGroup returns the stored voting group, in datum order. It is empty
+// until an ingest has read the hot NFT — in which case Cella must not pretend
+// to know what quorum is.
+func (d *DB) VotingGroup() (cardano.VotingGroup, error) {
+	rows, err := d.sql.Query(`
+SELECT key_hash, COALESCE(cert_hash,'') FROM voting_group ORDER BY position`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var g cardano.VotingGroup
+	for rows.Next() {
+		var id cardano.VotingIdentity
+		if err := rows.Scan(&id.KeyHash, &id.CertHash); err != nil {
+			return nil, err
+		}
+		g = append(g, id)
+	}
+	return g, rows.Err()
+}
+
+// Rationale is the committee's authored rationale for its vote on an action —
+// the reasoning that becomes the body of the anchored CIP-136 document.
+type Rationale struct {
+	Summary         string
+	Statement       string
+	Precedent       string
+	Counterargument string
+	Conclusion      string
+	AuthoredBy      string
+	UpdatedAt       int64
+}
+
+// Empty reports whether nothing has been authored yet.
+func (r Rationale) Empty() bool {
+	return strings.TrimSpace(r.Summary) == "" && strings.TrimSpace(r.Statement) == ""
+}
+
+// UpsertRationale records (or replaces) the committee's rationale for an action.
+func (d *DB) UpsertRationale(proposalID string, r Rationale) error {
+	_, err := d.sql.Exec(`
+INSERT INTO rationales
+  (proposal_id, summary, statement, precedent, counterargument, conclusion, authored_by, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(proposal_id) DO UPDATE SET
+  summary=excluded.summary, statement=excluded.statement, precedent=excluded.precedent,
+  counterargument=excluded.counterargument, conclusion=excluded.conclusion,
+  authored_by=excluded.authored_by, updated_at=excluded.updated_at`,
+		proposalID, r.Summary, r.Statement, r.Precedent, r.Counterargument, r.Conclusion,
+		r.AuthoredBy, time.Now().Unix())
+	return err
+}
+
+// RationaleFor returns the committee's rationale for an action. The bool is
+// false when none has been authored.
+func (d *DB) RationaleFor(proposalID string) (Rationale, bool, error) {
+	var r Rationale
+	row := d.sql.QueryRow(`
+SELECT COALESCE(summary,''), COALESCE(statement,''), COALESCE(precedent,''),
+       COALESCE(counterargument,''), COALESCE(conclusion,''), COALESCE(authored_by,''),
+       COALESCE(updated_at,0)
+FROM rationales WHERE proposal_id = ?`, proposalID)
+	err := row.Scan(&r.Summary, &r.Statement, &r.Precedent, &r.Counterargument,
+		&r.Conclusion, &r.AuthoredBy, &r.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return r, false, nil
+	}
+	if err != nil {
+		return r, false, err
+	}
+	return r, true, nil
 }
 
 // ReviewsFor returns reviews for the given proposal IDs, keyed by proposal_id.

@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
+	"github.com/Awen-online/cella/internal/cardano"
 	"github.com/Awen-online/cella/internal/config"
 	"github.com/Awen-online/cella/internal/constitution"
 	"github.com/Awen-online/cella/internal/koios"
@@ -64,6 +66,10 @@ usage:
 configuration (environment):
   CELLA_DB         path to the SQLite database   (default ./cella.db)
   CELLA_ADDR       web server listen address     (default :8080)
+  CELLA_SECRET     signs session cookies         (default: random key per start)
+  CELLA_DEMO       enable roster sign-in — NO AUTH; never on a reachable instance
+  CELLA_ROSTER     path to the delegate roster JSON (default: placeholder roster)
+  CELLA_HOT_NFT_ADDR  hot NFT script address — its datum sets the voting group + quorum
   KOIOS_URL        Koios API base URL            (default https://api.koios.rest/api/v1)
   KOIOS_TOKEN      optional Koios bearer token
   CELLA_LLM_URL    OpenAI-compatible endpoint    (e.g. http://localhost:11434/v1 for Ollama)
@@ -87,6 +93,24 @@ func runIngest(cfg config.Config, args []string) error {
 
 	ctx := context.Background()
 	kc := koios.New(cfg.KoiosURL, cfg.KoiosToken)
+
+	// The chain states an action's expiration as an epoch number. Capture the
+	// network's genesis parameters so the web UI can turn that into a real
+	// deadline without needing the network itself.
+	if gp, err := kc.Genesis(ctx); err != nil {
+		log.Printf("  warn: genesis parameters: %v (deadlines will show the raw epoch)", err)
+	} else if err := db.SaveNetwork(gp); err != nil {
+		return err
+	}
+
+	// Who may sign the committee's vote, and therefore what quorum is. The chain
+	// is the authority; a warning is enough if we cannot reach it, because
+	// everything else in Cella still works without it.
+	if cfg.HotNFTAddr != "" {
+		if err := syncVotingGroup(ctx, kc, db, cfg.HotNFTAddr); err != nil {
+			log.Printf("  warn: hot NFT voting group: %v", err)
+		}
+	}
 
 	actions, err := kc.GovernanceActions(ctx, *limit)
 	if err != nil {
@@ -116,6 +140,35 @@ func runIngest(cfg config.Config, args []string) error {
 	return nil
 }
 
+// syncVotingGroup reads the hot NFT's inline datum and records who the chain
+// will accept vote signatures from.
+func syncVotingGroup(ctx context.Context, kc *koios.Client, db *store.DB, addr string) error {
+	datum, err := kc.HotNFTDatum(ctx, addr)
+	if err != nil {
+		return err
+	}
+	group, err := cardano.DecodeHotDatum(datum)
+	if err != nil {
+		return err
+	}
+	if err := db.SaveVotingGroup(group); err != nil {
+		return err
+	}
+	log.Printf("hot NFT voting group: %d delegates, quorum %d", len(group.Distinct()), group.Quorum())
+	return nil
+}
+
+// browseURL turns a listen address into one you can actually click. A bare
+// ":8080" listens on every interface, so localhost is the sensible thing to
+// offer; an address that already names a host should be left alone rather than
+// having "localhost" glued to the front of it.
+func browseURL(addr string) string {
+	if strings.HasPrefix(addr, ":") {
+		return "http://localhost" + addr
+	}
+	return "http://" + addr
+}
+
 func runServe(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", cfg.Addr, "listen address")
@@ -129,8 +182,31 @@ func runServe(cfg config.Config, args []string) error {
 	}
 	defer db.Close()
 
-	log.Printf("cella %s serving on http://localhost%s", version, *addr)
-	return server.New(db).ListenAndServe(*addr)
+	body, err := server.LoadBody(cfg.RosterPath)
+	if err != nil {
+		return err
+	}
+	if cfg.RosterPath == "" {
+		log.Printf("warning: CELLA_ROSTER is not set — using the placeholder roster; no wallet can sign in")
+	} else {
+		log.Printf("roster: %s (%d delegates)", body.Name, len(body.Members))
+	}
+
+	if cfg.Secret == "" {
+		log.Printf("warning: CELLA_SECRET is not set — using a random session key; sessions will not survive a restart")
+	}
+	if cfg.Demo {
+		log.Printf("WARNING: CELLA_DEMO is set — anyone who can reach this instance may enter as any")
+		log.Printf("WARNING: delegate, cast votes in their name, and author the committee's rationale.")
+		log.Printf("WARNING: Do not expose this instance to a network.")
+	}
+
+	log.Printf("cella %s serving on %s", version, browseURL(*addr))
+	return server.New(db, server.Options{
+		Secret: cfg.Secret,
+		Demo:   cfg.Demo,
+		Body:   body,
+	}).ListenAndServe(*addr)
 }
 
 func runReview(cfg config.Config, args []string) error {

@@ -49,7 +49,9 @@ func seedServer(t *testing.T) (*Server, koios.GovernanceAction) {
 		t.Fatalf("seed review: %v", err)
 	}
 
-	return New(db), act
+	// Demo mode on: most tests exercise the chamber via roster sign-in. The
+	// tests that care about the gate build their own server.
+	return New(db, Options{Secret: "test-secret", Demo: true}), act
 }
 
 func get(t *testing.T, s *Server, path string) *httptest.ResponseRecorder {

@@ -36,3 +36,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Local delegate roster (real addresses — keep it out of the repo)
+/roster.json

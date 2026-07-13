@@ -6,41 +6,72 @@ package server
 import (
 	"html/template"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/Awen-online/cella/internal/store"
 )
 
+// Options configures the server.
+type Options struct {
+	// Secret signs session cookies and CSRF tokens. Empty means a random key
+	// generated at startup — secure, but sessions do not survive a restart.
+	Secret string
+
+	// Demo enables the entry splash's roster picker, which signs a visitor in as
+	// any delegate with no proof of identity. Never enable it on a reachable
+	// deployment.
+	Demo bool
+
+	// Body is the delegate roster. The zero value falls back to the placeholder
+	// roster, whose addresses cannot authenticate anyone.
+	Body Body
+}
+
 // Server is Cella's HTTP server.
 type Server struct {
 	db   *store.DB
+	key  []byte // signs session cookies and CSRF tokens
+	demo bool   // the roster picker is available (never in production)
+	body Body   // the delegate roster
 	mux  *http.ServeMux
 	tpl  *template.Template
 	dtpl *template.Template
 	ctpl *template.Template
 	etpl *template.Template
 	stpl *template.Template
+	rtpl *template.Template
 }
 
 // New builds a Server backed by db.
-func New(db *store.DB) *Server {
+func New(db *store.DB, opts Options) *Server {
+	body := opts.Body
+	if len(body.Members) == 0 {
+		body = demoBody
+	}
 	s := &Server{
 		db:   db,
+		key:  newKey(opts.Secret),
+		demo: opts.Demo,
+		body: body,
 		mux:  http.NewServeMux(),
 		tpl:  template.Must(template.New("index").Funcs(funcs).Parse(withFonts(indexHTML))),
 		dtpl: template.Must(template.New("detail").Funcs(funcs).Parse(withFonts(detailHTML))),
 		ctpl: template.Must(template.New("constitution").Parse(withFonts(constHTML))),
 		etpl: template.Must(template.New("enter").Parse(withFonts(enterHTML))),
 		stpl: template.Must(template.New("submit").Parse(withFonts(submitHTML))),
+		rtpl: template.Must(template.New("rationale").Funcs(funcs).Parse(withFonts(rationaleHTML))),
 	}
 	s.mux.HandleFunc("/", s.handleIndex)
 	s.mux.HandleFunc("/fonts/", s.handleFonts)
 	s.mux.HandleFunc("/action/", s.handleAction)
 	s.mux.HandleFunc("/submit/", s.handleSubmit)
+	s.mux.HandleFunc("/rationale/", s.handleRationale)
 	s.mux.HandleFunc("/constitution", s.handleConstitution)
 	s.mux.HandleFunc("/enter", s.handleEnter)
 	s.mux.HandleFunc("/vote", s.handleCastVote)
+	s.mux.HandleFunc("/vote/prepare", s.handleVotePrepare)
 	s.mux.HandleFunc("/auth/member", s.handleMemberLogin)
 	s.mux.HandleFunc("/auth/challenge", s.handleChallenge)
 	s.mux.HandleFunc("/auth/verify", s.handleVerify)
@@ -56,8 +87,11 @@ func New(db *store.DB) *Server {
 func (s *Server) ListenAndServe(addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           s.gate(s.mux),
+		Handler:           secureHeaders(s.gate(s.mux)),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	return srv.ListenAndServe()
 }
@@ -72,24 +106,36 @@ type actionView struct {
 	HasReview        bool
 	AbstractHTML     template.HTML
 
-	// Chamber deliberation (demo): the body's internal member stances.
+	// The chamber: the body's delegates and the positions they have recorded.
 	BodyName        string
 	Deliberation    []MemberStance
-	ChYes, ChNo, ChAb int
+	Tally           tally
 	ChamberPosition string
+
+	// HasRationale is true once the committee's rationale has been authored.
+	HasRationale bool
+
+	// Deadline is when voting closes on this action.
+	Deadline Deadline
 
 	// Full Constitutional Committee roster for this action (all seats; a seat
 	// with Voted=false is shown grayed as awaiting a vote).
 	Committee []CommitteeSeat
 
-	// The signed-in delegate's own internal position (drives the cast form).
-	// YourVote/YourRationale show the effective stance (a recorded vote if the
-	// delegate has cast one, otherwise their demo chamber stance); YouRecorded
-	// is true only once they have actually recorded a position.
+	// The signed-in delegate's own recorded position, which drives the ballot
+	// form. YouRecorded is false until they have actually taken one.
 	You           string
 	YourVote      string
 	YourRationale string
 	YouRecorded   bool
+
+	// YouCanSign is true when the signed-in delegate has a wallet registered in
+	// the roster, and so can sign their position rather than merely assert it.
+	YouCanSign bool
+
+	// CSRF is the anti-forgery token for this session, embedded in every form
+	// that changes state.
+	CSRF string
 }
 
 // CommitteeSeat is one CC member's position on an action (or a pending seat).
@@ -141,6 +187,17 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	chamberVotes, err := s.db.MemberVotesForAll(ids)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	net, err := s.db.Network()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	now := time.Now()
 
 	views := make([]actionView, 0, len(actions))
 	for _, a := range actions {
@@ -159,12 +216,18 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			av.Review, av.HasReview = rv, true
 		}
 		if mv, ok := myVotes[a.ProposalID]; ok {
-			av.YourVote = mv.Vote // a recorded position overrides the demo stance
-		} else if st, ok := stanceFor(a.ProposalID, you); ok {
-			av.YourVote = st.Vote // otherwise show the delegate's chamber stance
+			av.YourVote = mv.Vote
+		}
+		av.Tally, _ = tallyFrom(chamberVotes[a.ProposalID], s.body)
+		if a.Expiration.Valid {
+			av.Deadline = deadlineFor(a.Expiration.Int64, net, now)
 		}
 		views = append(views, av)
 	}
+
+	// What is about to run out comes first. The chain hands actions to us newest
+	// first, which is not the order a committee needs them in.
+	slices.SortStableFunc(views, byUrgency)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tpl.Execute(w, idxView{Member: m, Actions: views}); err != nil {
@@ -218,44 +281,53 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	av.AbstractHTML = mdHTML(a.Abstract)
 
-	// Chamber deliberation: demo stances, overlaid with any real member votes.
-	av.BodyName = demoBody.Name
-	av.Deliberation = deliberate(a.ProposalID, demoBody.Members)
-	realVotes, _ := s.db.MemberVotesFor(a.ProposalID)
-	for i := range av.Deliberation {
-		if mv, ok := realVotes[av.Deliberation[i].Name]; ok && mv.Vote != "" {
-			av.Deliberation[i].Vote = mv.Vote
-			av.Deliberation[i].Rationale = mv.Rationale
-			av.Deliberation[i].Real = true
-		}
+	// The chamber: every delegate's recorded position, and where that leaves the
+	// body. Nothing here is inferred — a delegate who has not voted shows as
+	// awaiting.
+	av.BodyName = s.body.Name
+	av.Deliberation, err = s.chamber(a.ProposalID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	you := strings.TrimSuffix(func() string { m, _ := s.member(r); return m }(), " (demo)")
+	t, _, err := s.tallyFor(a.ProposalID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	av.Tally = t
+	av.ChamberPosition = t.position()
+
+	sessionID, _ := s.member(r)
+	you := strings.TrimSuffix(sessionID, " (demo)")
 	av.You = you
+	av.CSRF = s.csrfToken(sessionID)
 	for _, st := range av.Deliberation {
 		if st.Name == you {
-			av.YourVote, av.YourRationale = st.Vote, st.Rationale
+			av.YourVote, av.YourRationale, av.YouRecorded = st.Vote, st.Rationale, st.Recorded
 			break
 		}
 	}
-	_, av.YouRecorded = realVotes[you]
-
-	for _, st := range av.Deliberation {
-		switch st.Vote {
-		case "Yes":
-			av.ChYes++
-		case "No":
-			av.ChNo++
-		case "Abstain":
-			av.ChAb++
-		}
+	if m, ok := s.body.ByName(you); ok && m.Address != "" {
+		av.YouCanSign = true
 	}
-	switch {
-	case av.ChYes > av.ChNo && av.ChYes >= av.ChAb:
-		av.ChamberPosition = "Leaning to approve"
-	case av.ChNo > av.ChYes && av.ChNo >= av.ChAb:
-		av.ChamberPosition = "Leaning to reject"
-	default:
-		av.ChamberPosition = "No consensus yet"
+
+	// A rationale can only be anchored once someone has written one.
+	rat, _, err := s.db.RationaleFor(a.ProposalID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	av.HasRationale = !rat.Empty()
+
+	// The clock. An action that expires unvoted is an accidental abstention.
+	net, err := s.db.Network()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if a.Expiration.Valid {
+		av.Deadline = deadlineFor(a.Expiration.Int64, net, time.Now())
 	}
 
 	// Full committee roster: every seat, voted or awaiting.
@@ -331,6 +403,20 @@ const indexHTML = `<!doctype html>
   th { font-family:'Cinzel',serif; color:var(--gold); font-size:12px; letter-spacing:.12em; text-transform:uppercase; }
   td.type { color:var(--goldb); white-space:nowrap; font-size:14px; }
   td.title { color:var(--ivory); }
+  td.dl { white-space:nowrap; }
+  .cd { font-family:'Cinzel',serif; font-size:13px; font-weight:700; letter-spacing:.04em; }
+  .cd.critical { color:var(--red); }
+  .cd.soon { color:var(--goldb); }
+  .cd.ok { color:var(--green); }
+  .cd.expired { color:var(--muted); text-decoration:line-through; }
+  .cd.unknown { color:var(--muted); font-weight:400; }
+  .dlwhen { color:var(--muted); font-size:11.5px; margin-top:3px; }
+  td.quorum { white-space:nowrap; }
+  .qn { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:14px; color:var(--muted); }
+  .qn.part { color:var(--goldb); }
+  .qn.full { color:var(--green); }
+  .qlab { color:var(--muted); font-size:11px; margin-top:2px; }
+  td .muted { color:var(--muted); }
   td.title a.atitle { color:var(--ivory); font-weight:600; text-decoration:none; }
   td.title a.atitle:hover { color:var(--goldb); text-decoration:underline; }
   td.id { font-family:ui-monospace,Consolas,monospace; font-size:12px; color:var(--muted); }
@@ -375,11 +461,22 @@ const indexHTML = `<!doctype html>
   <div class="legend">Constitutionality tags are AI-assisted assessments — the committee decides and signs. Run <code>cella review</code> to generate them with your own model.</div>
   {{if .Actions}}
   <table>
-    <thead><tr><th>Date</th><th>Type</th><th>Action</th><th>Your vote</th><th>CC votes &amp; rationales</th></tr></thead>
+    <thead><tr><th>Deadline</th><th>Chamber</th><th>Type</th><th>Action</th><th>Your vote</th><th>CC votes &amp; rationales</th></tr></thead>
     <tbody>
       {{range .Actions}}
       <tr>
-        <td>{{date .BlockTime}}</td>
+        <td class="dl">
+          {{if .Deadline.Epoch}}
+            <div class="cd {{.Deadline.Urgency}}" {{if .Deadline.Unix}}data-deadline="{{.Deadline.Unix}}"{{end}}>{{if .Deadline.Countdown}}{{.Deadline.Countdown}}{{else}}epoch {{.Deadline.Epoch}}{{end}}</div>
+            <div class="dlwhen">{{.Deadline.When}}</div>
+          {{else}}
+            <span class="muted">—</span>
+          {{end}}
+        </td>
+        <td class="quorum">
+          <span class="qn {{if eq .Tally.Recorded .Tally.Seats}}full{{else if .Tally.Recorded}}part{{end}}">{{.Tally.Recorded}}/{{.Tally.Seats}}</span>
+          <div class="qlab">recorded</div>
+        </td>
         <td class="type">{{.Type}}</td>
         <td class="title">
           <a class="atitle" href="/action/{{.Slug}}">{{if .Title}}{{.Title}}{{else}}(no anchored title){{end}}</a>
@@ -423,6 +520,33 @@ const indexHTML = `<!doctype html>
   {{end}}
 </main>
 <footer>Cella · built &amp; maintained by Awen LLC · Apache-2.0</footer>
+<script>
+// Tick the countdowns so a page left open does not quietly go stale — a stale
+// clock on a governance deadline is worse than no clock.
+(function () {
+  var els = Array.prototype.slice.call(document.querySelectorAll('.cd[data-deadline]'));
+  if (!els.length) return;
+
+  function plural(n, unit) { return n === 1 ? '1 ' + unit : n + ' ' + unit + 's'; }
+
+  function render(el) {
+    var left = (parseInt(el.getAttribute('data-deadline'), 10) * 1000) - Date.now();
+    el.classList.remove('ok', 'soon', 'critical', 'expired');
+    if (left <= 0) { el.textContent = 'expired'; el.classList.add('expired'); return; }
+
+    var mins = left / 60000, hours = mins / 60, days = hours / 24;
+    if (hours < 1)       el.textContent = plural(Math.ceil(mins), 'minute') + ' left';
+    else if (hours < 48) el.textContent = plural(Math.floor(hours), 'hour') + ' left';
+    else                 el.textContent = plural(Math.floor(days), 'day') + ' left';
+
+    el.classList.add(hours < 48 ? 'critical' : (days < 5 ? 'soon' : 'ok'));
+  }
+
+  function tick() { els.forEach(render); }
+  tick();
+  setInterval(tick, 30000);
+})();
+</script>
 </body>
 </html>`
 
@@ -447,6 +571,20 @@ const detailHTML = `<!doctype html>
   .type { color:var(--goldb); font-size:13px; text-transform:uppercase; letter-spacing:.08em; font-family:'Cinzel',serif; }
   .meta { color:var(--muted); font-size:15px; margin-top:8px; line-height:1.65; }
   .meta code { font-family:ui-monospace,Consolas,monospace; color:var(--body); font-size:12px; word-break:break-all; }
+  .deadline { margin-top:12px; padding:10px 14px; border-radius:10px; border:1px solid; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  .deadline .cd { font-family:'Cinzel',serif; font-size:15px; font-weight:700; letter-spacing:.04em; }
+  .deadline .dlwhen { color:var(--muted); font-size:13px; }
+  .deadline .dlnote { color:var(--muted); font-size:12.5px; font-style:italic; flex-basis:100%; }
+  .deadline.critical { border-color:rgba(217,105,95,.5); background:rgba(217,105,95,.08); }
+  .deadline.critical .cd { color:var(--red); }
+  .deadline.soon { border-color:rgba(245,210,122,.45); background:rgba(245,210,122,.06); }
+  .deadline.soon .cd { color:var(--goldb); }
+  .deadline.ok { border-color:rgba(75,189,136,.35); background:rgba(75,189,136,.06); }
+  .deadline.ok .cd { color:var(--green); }
+  .deadline.expired { border-color:rgba(139,147,184,.3); }
+  .deadline.expired .cd { color:var(--muted); }
+  .deadline.unknown { border-color:rgba(139,147,184,.3); }
+  .deadline.unknown .cd { color:var(--muted); font-weight:400; }
   .meta a { color:var(--blue); text-decoration:none; }
   .card { background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:18px 20px; margin-top:20px; }
   .card h2 { font-family:'Cinzel',serif; color:var(--gold); font-size:13px; letter-spacing:.12em; text-transform:uppercase; margin:0 0 10px; }
@@ -479,7 +617,15 @@ const detailHTML = `<!doctype html>
   .chpos { font-size:14px; color:var(--muted); margin-bottom:14px; }
   .chpos b { color:var(--ivory); }
   .chpos .y { color:var(--green); } .chpos .n { color:var(--red); } .chpos .a { color:var(--muted); }
-  .chpos .demo { font-family:'Cinzel',serif; font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--goldb); border:1px solid rgba(245,210,122,.4); border-radius:999px; padding:1px 8px; margin-left:6px; }
+  .delib.awaiting { opacity:.5; }
+  .dvote.pending { color:var(--muted); border-color:rgba(139,147,184,.3); }
+  .drat.none { color:var(--muted); font-style:italic; }
+  .sigtag { font-family:'Cinzel',serif; font-size:9px; letter-spacing:.08em; text-transform:uppercase; border-radius:999px; padding:1px 8px; margin-left:8px; white-space:nowrap; }
+  .sigtag.signed { color:var(--green); border:1px solid rgba(75,189,136,.5); }
+  .sigtag.unsigned { color:var(--muted); border:1px solid rgba(139,147,184,.35); }
+  .signbox { margin-top:12px; padding:10px 13px; border-radius:9px; border:1px dashed rgba(245,210,122,.4); color:var(--muted); font-size:13px; line-height:1.55; }
+  .signbox b { color:var(--goldb); }
+  #vote-msg { color:var(--goldb); font-size:13px; margin-top:9px; min-height:1.2em; }
   .delib-list { display:flex; flex-direction:column; gap:14px; }
   .delib { display:grid; grid-template-columns:76px 1fr; gap:13px; align-items:start; }
   .dvote { font-family:'Cinzel',serif; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; text-align:center; padding:6px 0; border-radius:8px; border:1px solid; }
@@ -487,7 +633,6 @@ const detailHTML = `<!doctype html>
   .dname { color:var(--ivory); font-family:'Cinzel',serif; font-size:14px; font-weight:700; letter-spacing:.02em; }
   .drole { color:var(--muted); font-family:'EB Garamond',serif; font-size:12.5px; font-weight:400; letter-spacing:0; text-transform:none; margin-left:6px; }
   .drat { color:var(--body); font-size:14.5px; line-height:1.5; margin-top:3px; }
-  .realtag { color:var(--green); font-family:'Cinzel',serif; font-size:9px; letter-spacing:.08em; text-transform:uppercase; border:1px solid rgba(75,189,136,.5); border-radius:999px; padding:1px 7px; margin-left:8px; }
   .castnote { font-size:13.5px; color:var(--muted); margin:2px 0 12px; line-height:1.5; }
   .castradios { display:flex; gap:10px; margin:6px 0 12px; flex-wrap:wrap; }
   .cr { display:inline-flex; align-items:center; gap:7px; border:1px solid rgba(201,137,42,.3); border-radius:999px; padding:8px 16px; cursor:pointer; font-size:14px; color:var(--body); }
@@ -495,8 +640,11 @@ const detailHTML = `<!doctype html>
   .cr:hover { border-color:rgba(245,210,122,.6); }
   .castform textarea { width:100%; min-height:78px; background:var(--forum); border:1px solid rgba(201,137,42,.25); border-radius:10px; color:var(--body); font-family:'EB Garamond',Georgia,serif; font-size:15px; padding:11px 13px; resize:vertical; }
   .cast-btn { margin-top:12px; font-family:'Cinzel',serif; font-size:12px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; color:var(--forum); background:linear-gradient(180deg,var(--goldb),var(--gold)); border:0; border-radius:10px; padding:11px 22px; cursor:pointer; }
+  .onward { display:flex; gap:12px; flex-wrap:wrap; margin:6px 0 2px; }
   .submit-btn { display:inline-block; font-family:'Cinzel',serif; font-size:13px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; color:var(--forum); background:linear-gradient(180deg,var(--goldb),var(--gold)); text-decoration:none; border-radius:10px; padding:12px 22px; }
   .submit-btn:hover { filter:brightness(1.05); }
+  .rat-btn { display:inline-block; font-family:'Cinzel',serif; font-size:13px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; color:var(--goldb); border:1px solid rgba(245,210,122,.45); text-decoration:none; border-radius:10px; padding:12px 22px; }
+  .rat-btn:hover { background:rgba(245,210,122,.1); }
   footer { padding:20px 6vw; color:var(--muted); font-size:13px; border-top:1px solid rgba(201,137,42,.15); }
 </style>
 </head>
@@ -508,8 +656,15 @@ const detailHTML = `<!doctype html>
 <main>
   <div class="type">{{.Type}}</div>
   <h1>{{if .Title}}{{.Title}}{{else}}<span class="muted">(no anchored title)</span>{{end}}</h1>
+  {{if .Deadline.Epoch}}
+  <div class="deadline {{.Deadline.Urgency}}">
+    <span class="cd">{{if .Deadline.Countdown}}{{.Deadline.Countdown}}{{else}}expires epoch {{.Deadline.Epoch}}{{end}}</span>
+    <span class="dlwhen">{{.Deadline.When}}</span>
+    {{if and (not .Deadline.Expired) .Deadline.Known}}<span class="dlnote">An action that expires unvoted is an abstention the committee never chose.</span>{{end}}
+  </div>
+  {{end}}
   <div class="meta">
-    Seen {{date .BlockTime}}{{if .Expiration.Valid}} · expires {{date .Expiration.Int64}}{{end}}<br>
+    Seen {{date .BlockTime}}<br>
     <code>{{.ProposalID}}</code>
     <br><a href="https://adastat.net/governances/{{.GovID}}" target="_blank" rel="noopener">View on AdaStat &#8599;</a>
     {{if .MetaURL}}&nbsp;·&nbsp;<a href="{{.MetaURL}}" rel="noopener">Anchor metadata &#8599;</a>{{end}}
@@ -533,14 +688,24 @@ const detailHTML = `<!doctype html>
 
   <div class="card">
     <h2>Chamber deliberation — {{.BodyName}}</h2>
-    <div class="chpos">Chamber position: <b>{{.ChamberPosition}}</b> &nbsp;·&nbsp; <span class="y">{{.ChYes}} Yes</span> · <span class="n">{{.ChNo}} No</span> · <span class="a">{{.ChAb}} Abstain</span> <span class="demo">demo</span></div>
+    <div class="chpos">Chamber position: <b>{{.ChamberPosition}}</b> &nbsp;·&nbsp; <span class="y">{{.Tally.Yes}} Yes</span> · <span class="n">{{.Tally.No}} No</span> · <span class="a">{{.Tally.Abstain}} Abstain</span> · <span class="a">{{.Tally.DidNotVote}} awaiting</span></div>
     <div class="delib-list">
       {{range .Deliberation}}
-      <div class="delib">
+      <div class="delib{{if not .Recorded}} awaiting{{end}}">
+        {{if .Recorded}}
         <div class="dvote {{if eq .Vote "Yes"}}y{{else if eq .Vote "No"}}n{{else}}a{{end}}">{{.Vote}}</div>
+        {{else}}
+        <div class="dvote pending">—</div>
+        {{end}}
         <div>
-          <div class="dname">{{.Member.Name}} <span class="drole">{{.Member.Role}}</span>{{if .Real}} <span class="realtag">recorded</span>{{end}}</div>
-          <div class="drat">{{.Rationale}}</div>
+          <div class="dname">{{.Member.Name}} <span class="drole">{{.Member.Role}}</span>
+            {{if .Recorded}}{{if .Signed}}<span class="sigtag signed" title="Signed by the delegate's wallet">&#10003; signed</span>{{else}}<span class="sigtag unsigned" title="Recorded from a session, not signed by a wallet">unsigned</span>{{end}}{{end}}
+          </div>
+          {{if .Recorded}}
+            {{if .Rationale}}<div class="drat">{{.Rationale}}</div>{{else}}<div class="drat none">Recorded without a rationale.</div>{{end}}
+          {{else}}
+            <div class="drat none">Has not recorded a position yet.</div>
+          {{end}}
         </div>
       </div>
       {{end}}
@@ -550,21 +715,35 @@ const detailHTML = `<!doctype html>
   {{if .You}}
   <div class="card" id="your-position">
     <h2>Your position &middot; {{.You}}</h2>
-    {{if .YouRecorded}}<div class="castnote">You have recorded this position. Update it any time before the committee submits.</div>{{else}}<div class="castnote">Showing your chamber stance for this action. Record it to confirm it as your position.</div>{{end}}
-    <form method="post" action="/vote" class="castform">
+    {{if .YouRecorded}}<div class="castnote">You have recorded this position. Update it any time before the committee submits.</div>{{else}}<div class="castnote">You have not recorded a position on this action yet. Your co-delegates see it as soon as you do.</div>{{end}}
+    <form method="post" action="/vote" class="castform" id="castform">
       <input type="hidden" name="slug" value="{{.Slug}}">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="signature" id="vote-sig">
+      <input type="hidden" name="key" id="vote-key">
       <div class="castradios">
         <label class="cr"><input type="radio" name="vote" value="Yes" {{if eq .YourVote "Yes"}}checked{{end}}>Yes</label>
         <label class="cr"><input type="radio" name="vote" value="No" {{if eq .YourVote "No"}}checked{{end}}>No</label>
         <label class="cr"><input type="radio" name="vote" value="Abstain" {{if eq .YourVote "Abstain"}}checked{{end}}>Abstain</label>
       </div>
-      <textarea name="rationale" placeholder="Your rationale (recorded for the body)…">{{.YourRationale}}</textarea>
-      <div><button type="submit" class="cast-btn">{{if .YouRecorded}}Update my position{{else}}Record my position{{end}}</button></div>
+      <textarea name="rationale" id="vote-rationale" placeholder="Your rationale (recorded for the body)…">{{.YourRationale}}</textarea>
+      <div>
+        <button type="submit" class="cast-btn" id="cast-btn">
+          {{if .YouCanSign}}Sign &amp; {{if .YouRecorded}}update{{else}}record{{end}} my position{{else}}{{if .YouRecorded}}Update my position{{else}}Record my position{{end}}{{end}}
+        </button>
+      </div>
+      <div id="vote-msg"></div>
+      {{if .YouCanSign}}
+      <div class="signbox">Your wallet will show you the position you are about to record and ask you to sign it. <b>No funds move.</b> The signature is what makes this position provably yours rather than merely whatever your session said — and the body's split is published in the committee's anchored rationale.</div>
+      {{else}}
+      <div class="signbox">No wallet is registered against your name in the roster, so this position will be recorded <b>unsigned</b> — attributable only to your session. Register a wallet address to sign your positions.</div>
+      {{end}}
     </form>
   </div>
   {{end}}
 
-  <div style="margin:6px 0 2px;">
+  <div class="onward">
+    <a class="rat-btn" href="/rationale/{{.Slug}}">Author the committee rationale &#8594;</a>
     <a class="submit-btn" href="/submit/{{.Slug}}">Submit committee vote on-chain &#8594;</a>
   </div>
 
@@ -586,5 +765,90 @@ const detailHTML = `<!doctype html>
   </div>
 </main>
 <footer>Cella · built &amp; maintained by Awen LLC · Apache-2.0</footer>
+{{if .YouCanSign}}
+<script>
+// Sign the position before recording it. The message is fetched from the server
+// rather than composed here: the server decides what a signature means, and it
+// re-derives the same bytes when it verifies. Anything this script invented
+// would simply fail to verify.
+(function () {
+  var form = document.getElementById('castform');
+  var btn  = document.getElementById('cast-btn');
+  var msg  = document.getElementById('vote-msg');
+  var sigF = document.getElementById('vote-sig');
+  var keyF = document.getElementById('vote-key');
+  var signed = false;
+
+  function chosen() {
+    var r = form.querySelector('input[name=vote]:checked');
+    return r ? r.value : '';
+  }
+  function errText(e) {
+    if (!e) return 'unknown';
+    if (typeof e === 'string') return e;
+    return e.info || e.message || String(e);
+  }
+  function pickWallet() {
+    var keys = Object.keys(window.cardano || {}).filter(function (k) {
+      var w = window.cardano[k];
+      return w && typeof w.enable === 'function' && typeof w.icon !== 'undefined';
+    });
+    return keys.length ? keys[0] : null;
+  }
+
+  form.addEventListener('submit', async function (e) {
+    if (signed) return;            // already signed — let it through
+    e.preventDefault();
+
+    if (!chosen()) { msg.textContent = 'Choose Yes, No or Abstain first.'; return; }
+
+    var key = pickWallet();
+    if (!key) { msg.textContent = 'No Cardano wallet found in this browser. Install Eternl or Lace to sign your position.'; return; }
+
+    btn.disabled = true;
+    try {
+      // Ask the server what, exactly, is being signed.
+      msg.textContent = 'Preparing the position…';
+      var body = new URLSearchParams({
+        slug: form.slug.value,
+        csrf: form.csrf.value,
+        vote: chosen(),
+        rationale: document.getElementById('vote-rationale').value
+      });
+      var prep = await fetch('/vote/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body
+      });
+      if (!prep.ok) {
+        var pe = await prep.json().catch(function () { return {}; });
+        msg.textContent = 'Could not prepare the position (' + (pe.error || prep.status) + ').';
+        btn.disabled = false;
+        return;
+      }
+      var prepared = await prep.json();
+
+      var w = window.cardano[key];
+      msg.textContent = 'Approve the signature in ' + (w.name || key) + '…';
+      var api = await w.enable();
+      var rew = await api.getRewardAddresses();
+      var addr = (rew && rew[0]) || (await api.getUsedAddresses())[0];
+      if (!addr) { msg.textContent = 'Could not read an address from your wallet.'; btn.disabled = false; return; }
+
+      var out = await api.signData(addr, prepared.hex);
+      sigF.value = out.signature;
+      keyF.value = out.key;
+
+      signed = true;
+      msg.textContent = 'Signed. Recording…';
+      form.submit();
+    } catch (err) {
+      msg.textContent = 'Signing cancelled or failed (' + errText(err) + '). Your position was not recorded.';
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
+{{end}}
 </body>
 </html>`
