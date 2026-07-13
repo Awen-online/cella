@@ -83,8 +83,11 @@ func TestUpsertVotesFiltersCCAndGroups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertVotes: %v", err)
 	}
+	// The count reported is the committee's own — that is what an ingest run is
+	// counting. The DRep and SPO votes are kept too, but they are context, not
+	// committee votes, and must never be added to the committee's tally.
 	if n != 2 {
-		t.Fatalf("stored %d votes, want 2 (CC only, DRep/SPO filtered out)", n)
+		t.Fatalf("reported %d committee votes, want 2", n)
 	}
 
 	grouped, err := db.VotesFor([]string{"gov_action1", "gov_action_absent"})
@@ -221,4 +224,63 @@ func TestRationaleEmpty(t *testing.T) {
 			t.Errorf("%s: Empty() = %v, want %v", name, got, tc.want)
 		}
 	}
+}
+
+// The committee is not bound by the rest of the chain, but it should be able to
+// read the rest of the chain's reasoning. DRep and SPO votes are therefore kept,
+// not discarded — and kept apart from the committee's own.
+func TestVotesByRole(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "roles.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.UpsertVotes("gov_action1", []koios.Vote{
+		{VoterRole: "ConstitutionalCommittee", VoterID: "cc_hot_1", Vote: "Yes"},
+		{VoterRole: "DRep", VoterID: "drep_quiet", Vote: "No"},
+		{VoterRole: "DRep", VoterID: "drep_loud", Vote: "Yes", MetaURL: "ipfs://why"},
+		{VoterRole: "SPO", VoterID: "pool_1", Vote: "Abstain"},
+	}); err != nil {
+		t.Fatalf("UpsertVotes: %v", err)
+	}
+
+	dreps, err := db.VotesByRole("gov_action1", "DRep")
+	if err != nil {
+		t.Fatalf("VotesByRole: %v", err)
+	}
+	if len(dreps) != 2 {
+		t.Fatalf("got %d DRep votes, want 2", len(dreps))
+	}
+	// A voter who published their reasoning comes first: the committee is here to
+	// read reasoning, not to count heads.
+	if dreps[0].VoterID != "drep_loud" || !dreps[0].HasRationale() {
+		t.Errorf("first DRep = %+v, want drep_loud with a rationale", dreps[0])
+	}
+	if dreps[1].HasRationale() {
+		t.Errorf("drep_quiet published no rationale, but one was reported: %+v", dreps[1])
+	}
+
+	pools, err := db.VotesByRole("gov_action1", "SPO")
+	if err != nil {
+		t.Fatalf("VotesByRole SPO: %v", err)
+	}
+	if len(pools) != 1 || pools[0].VoterID != "pool_1" {
+		t.Fatalf("got %+v, want the single SPO vote", pools)
+	}
+
+	// And the committee's own tally is untouched by any of them.
+	cc := mustVotes(t, db, "gov_action1")
+	if len(cc) != 1 || cc[0].VoterID != "cc_hot_1" {
+		t.Errorf("committee votes = %+v, want only cc_hot_1", cc)
+	}
+}
+
+func mustVotes(t *testing.T, db *DB, id string) []VoteRow {
+	t.Helper()
+	grouped, err := db.VotesFor([]string{id})
+	if err != nil {
+		t.Fatalf("VotesFor: %v", err)
+	}
+	return grouped[id]
 }

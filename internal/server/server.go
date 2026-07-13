@@ -4,6 +4,7 @@
 package server
 
 import (
+	"fmt"
 	"html/template"
 	"math/big"
 	"net/http"
@@ -152,6 +153,16 @@ type actionView struct {
 	// and SPO tallies. Context for the committee's own decision, not a mandate.
 	Summary    koios.VotingSummary
 	HasSummary bool
+
+	// The individual votes behind those tallies, and — where the voter published
+	// one — a link to the reasoning they gave. A stake-weighted percentage tells
+	// the committee that the delegate representatives disagree with it; only the
+	// rationales tell it why, which is the part worth reading before a final
+	// vote.
+	DRepBallots    []ChainVote
+	PoolBallots    []ChainVote
+	DRepRationales int
+	PoolRationales int
 
 	// The proposer's own case (CIP-108), as opposed to the committee's.
 	MotivationHTML        template.HTML
@@ -427,6 +438,16 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	av.Explorer = s.net.ExplorerAction(a.GovID())
 	av.Payload, av.HasPayload = a.Payload()
 	av.Summary, av.HasSummary = a.Summary()
+
+	if dreps, err := s.db.VotesByRole(a.ProposalID, "DRep"); err == nil {
+		av.DRepBallots = chainVotes(dreps, s.net, "DRep")
+		av.DRepRationales = rationaleCount(av.DRepBallots)
+	}
+	if pools, err := s.db.VotesByRole(a.ProposalID, "SPO"); err == nil {
+		av.PoolBallots = chainVotes(pools, s.net, "SPO")
+		av.PoolRationales = rationaleCount(av.PoolBallots)
+	}
+
 	av.MotivationHTML = mdHTML(a.Motivation)
 	av.ProposerRationaleHTML = mdHTML(a.ProposerRationale)
 	av.Alignment, av.HasAlignment = alignmentFor(a.Type)
@@ -497,6 +518,23 @@ var funcs = template.FuncMap{
 		return s[:8] + "…" + s[len(s)-6:]
 	},
 	"ccname": ccMemberName,
+
+	// dict passes more than one value into a sub-template, which Go's templates
+	// otherwise cannot do — the ballot list is rendered once per voter role.
+	"dict": func(kv ...any) (map[string]any, error) {
+		if len(kv)%2 != 0 {
+			return nil, fmt.Errorf("dict: odd number of arguments")
+		}
+		m := make(map[string]any, len(kv)/2)
+		for i := 0; i < len(kv); i += 2 {
+			k, ok := kv[i].(string)
+			if !ok {
+				return nil, fmt.Errorf("dict: key %d is not a string", i)
+			}
+			m[k] = kv[i+1]
+		}
+		return m, nil
+	},
 
 	// ada renders lovelace exactly. A treasury figure that has been through a
 	// float is a treasury figure that may be wrong.
@@ -854,6 +892,36 @@ const detailHTML = `<!doctype html>
   .vc-legend .y { color:var(--green); } .vc-legend .n { color:var(--red); } .vc-legend .a { color:var(--muted); }
   .vc-cast { margin-left:8px; font-size:12px; }
   .vc-foot { color:var(--muted); font-size:12px; font-style:italic; border-top:1px solid rgba(201,137,42,.12); padding-top:11px; }
+
+  /* The individual ballots. Collapsed by default: a committee scanning an action
+     wants the tallies, and only sometimes the 44 rows behind them. */
+  .vc-ballots { margin-top:10px; }
+  .vc-ballots > summary { cursor:pointer; list-style:none; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding:5px 0; }
+  .vc-ballots > summary::-webkit-details-marker { display:none; }
+  .vc-ballots > summary::before { content:"\25B8"; color:var(--gold); font-size:11px; transition:transform .15s ease; }
+  .vc-ballots[open] > summary::before { transform:rotate(90deg); }
+  .vc-open { font-size:13px; color:var(--gold); }
+  .vc-ballots > summary:hover .vc-open { text-decoration:underline; }
+  .vc-rat { font-size:12px; color:var(--muted); }
+  .vc-rat.none { font-style:italic; opacity:.75; }
+
+  /* No inner scrollbar: the list is collapsed until a delegate asks for it, and
+     a delegate who asked to see how each one voted meant all of them. */
+  .vc-list { margin-top:8px; border-top:1px solid rgba(201,137,42,.12); border-bottom:1px solid rgba(201,137,42,.12); }
+  .vc-row { display:grid; grid-template-columns:64px minmax(0,1fr) auto; align-items:center; gap:12px; padding:7px 2px; border-bottom:1px solid rgba(139,147,184,.09); font-size:13px; }
+  .vc-row:last-child { border-bottom:none; }
+  .vc-v { font-family:'Cinzel',serif; font-size:10px; letter-spacing:.07em; text-transform:uppercase; text-align:center; border-radius:999px; padding:2px 0; border:1px solid currentColor; }
+  .vc-v.y { color:var(--green); } .vc-v.n { color:var(--red); } .vc-v.a { color:var(--muted); }
+  .vc-id { font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:12px; color:var(--muted); text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .vc-id:hover { color:var(--text); text-decoration:underline; }
+  .vc-why { font-size:12px; color:var(--gold); text-decoration:none; white-space:nowrap; }
+  .vc-why:hover { text-decoration:underline; }
+  .vc-why.none { color:var(--muted); opacity:.45; font-style:italic; }
+  .vc-ext { margin-top:9px; color:var(--muted); font-size:11.5px; font-style:italic; }
+  @media (max-width:560px) {
+    .vc-row { grid-template-columns:58px minmax(0,1fr); }
+    .vc-why { grid-column:2; justify-self:start; }
+  }
 
   /* The proposer's own case. */
   .pcase-note { color:var(--muted); font-size:13px; font-style:italic; margin-bottom:12px; }

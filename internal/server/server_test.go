@@ -40,7 +40,7 @@ func seedServer(t *testing.T) (*Server, koios.GovernanceAction) {
 	votes := []koios.Vote{
 		{VoterRole: "ConstitutionalCommittee", VoterID: "cc_hot_1", Vote: "Yes", MetaURL: "https://example.org/rationale1", BlockTime: 1_700_000_100},
 		{VoterRole: "ConstitutionalCommittee", VoterID: "cc_hot_2", Vote: "No", BlockTime: 1_700_000_200},
-		{VoterRole: "DRep", VoterID: "drep_1", Vote: "Yes", BlockTime: 1_700_000_300}, // must be filtered
+		{VoterRole: "DRep", VoterID: "drep_1", Vote: "Yes", MetaURL: "ipfs://drep-rationale-cid", BlockTime: 1_700_000_300},
 	}
 	if _, err := db.UpsertVotes(act.ProposalID, votes); err != nil {
 		t.Fatalf("seed votes: %v", err)
@@ -111,14 +111,65 @@ func TestHandleDetail(t *testing.T) {
 		"rationale",                        // rationale link
 		"constitutional",                   // AI verdict
 		"Aligns with treasury guardrails.", // AI summary
-		"1 Yes", "1 No",                    // tally (CC only)
+		"1 Yes", "1 No",                    // tally (CC only — the DRep is not counted in it)
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("detail page missing %q", want)
 		}
 	}
-	if strings.Contains(body, "drep_1") {
-		t.Error("detail page leaked a non-CC (DRep) voter")
+
+	// The DRep's vote is context, never part of the committee's tally. It must
+	// not be mistaken for a seat: the count above stays 1 Yes / 1 No, and the
+	// DRep must not appear in the committee's own table of voters.
+	cc, _, _ := strings.Cut(body, "How the rest of the chain is voting")
+	if strings.Contains(cc, "drep_1") {
+		t.Error("a DRep appears in the committee's own vote table; it is not a committee member")
+	}
+}
+
+// The committee is not bound by how the delegate representatives voted, but it
+// should be able to read why they voted that way. A DRep who published a
+// rationale must be reachable from the action page in one click.
+func TestDetailLinksDRepRationales(t *testing.T) {
+	s, act := seedServer(t)
+
+	// The panel only renders when the chain has reported a tally to sit above it.
+	if err := s.db.SaveVotingSummary(act.ProposalID, koios.VotingSummary{DRepYesVotes: 1, DRepYesPct: 100}); err != nil {
+		t.Fatalf("seed voting summary: %v", err)
+	}
+
+	body := get(t, s, "/action/"+fmt.Sprintf("%s-%d", act.TxHash, act.Index)).Body.String()
+
+	// ipfs:// is rewritten to a gateway — a browser cannot follow it otherwise.
+	if !strings.Contains(body, "https://ipfs.io/ipfs/drep-rationale-cid") {
+		t.Error("the DRep's published rationale is not linked")
+	}
+	if !strings.Contains(body, "adastat.net/dreps/drep_1") {
+		t.Error("the DRep is not linked to a block explorer")
+	}
+	if !strings.Contains(body, "1 published a rationale") {
+		t.Error("the count of published rationales is not shown")
+	}
+}
+
+// A rationale anchor is written by a stranger and read off the chain. Cella will
+// render it as a link, so anything that is not a web or IPFS address must be
+// dropped rather than trusted into an href.
+func TestRationaleLinkRejectsHostileSchemes(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"https://example.org/why", "https://example.org/why"},
+		{"http://example.org/why", "http://example.org/why"},
+		{"ipfs://QmAbc123", "https://ipfs.io/ipfs/QmAbc123"},
+		{"ipfs://QmAbc123/doc.json", "https://ipfs.io/ipfs/QmAbc123/doc.json"},
+		{"javascript:alert(1)", ""},
+		{"data:text/html;base64,PHNjcmlwdD4=", ""},
+		{"file:///etc/passwd", ""},
+		{"", ""},
+		{"   ", ""},
+	} {
+		if got := rationaleLink(tc.in); got != tc.want {
+			t.Errorf("rationaleLink(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 

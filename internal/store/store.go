@@ -164,6 +164,11 @@ func Open(path string) (*DB, error) {
 		// The ecosystem's stake-weighted verdict, as context for the committee's.
 		`ALTER TABLE governance_actions ADD COLUMN voting_summary TEXT`,
 
+		// Every voter's role, so DRep and SPO votes can be kept rather than thrown
+		// away. A committee weighing constitutionality wants to read why the
+		// delegate representatives voted as they did, not just how many did.
+		`ALTER TABLE cc_votes ADD COLUMN voter_role TEXT`,
+
 		// The committee's own ratification threshold, as the chain sets it.
 		`ALTER TABLE network ADD COLUMN quorum_numerator INTEGER`,
 		`ALTER TABLE network ADD COLUMN quorum_denominator INTEGER`,
@@ -419,24 +424,27 @@ func (d *DB) UpsertVotes(proposalID string, votes []koios.Vote) (int, error) {
 	defer tx.Rollback()
 
 	stmt, err := tx.Prepare(`
-INSERT INTO cc_votes (proposal_id, cc_hot_id, vote, rationale_url, block_time)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO cc_votes (proposal_id, cc_hot_id, vote, rationale_url, block_time, voter_role)
+VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT(proposal_id, cc_hot_id) DO UPDATE SET
-  vote=excluded.vote, rationale_url=excluded.rationale_url, block_time=excluded.block_time`)
+  vote=excluded.vote, rationale_url=excluded.rationale_url,
+  block_time=excluded.block_time, voter_role=excluded.voter_role`)
 	if err != nil {
 		return 0, err
 	}
 	defer stmt.Close()
 
+	// Every role is kept now, not only the committee's. A committee weighing
+	// constitutionality should be able to read the delegate representatives'
+	// reasoning — many publish a rationale — rather than seeing only a tally.
 	n := 0
 	for _, v := range votes {
-		if v.VoterRole != "ConstitutionalCommittee" {
-			continue
-		}
-		if _, err := stmt.Exec(proposalID, v.VoterID, v.Vote, v.MetaURL, v.BlockTime); err != nil {
+		if _, err := stmt.Exec(proposalID, v.VoterID, v.Vote, v.MetaURL, v.BlockTime, v.VoterRole); err != nil {
 			return n, err
 		}
-		n++
+		if v.VoterRole == "ConstitutionalCommittee" {
+			n++ // the count the caller reports is still the committee's
+		}
 	}
 	return n, tx.Commit()
 }
@@ -466,6 +474,7 @@ func (d *DB) VotesFor(ids []string) (map[string][]VoteRow, error) {
 SELECT proposal_id, cc_hot_id, vote, rationale_url, block_time
 FROM cc_votes
 WHERE proposal_id IN (`+placeholders+`)
+  AND COALESCE(voter_role,'ConstitutionalCommittee') = 'ConstitutionalCommittee'
 ORDER BY cc_hot_id`, args...)
 	if err != nil {
 		return nil, err
@@ -480,6 +489,45 @@ ORDER BY cc_hot_id`, args...)
 		}
 		r.RationaleURL = rationale.String
 		out[r.ProposalID] = append(out[r.ProposalID], r)
+	}
+	return out, rows.Err()
+}
+
+// ChainVote is one vote cast by somebody other than the committee — a delegate
+// representative or a stake pool operator.
+type ChainVote struct {
+	VoterID      string
+	Vote         string
+	RationaleURL string
+	BlockTime    int64
+}
+
+// HasRationale reports whether this voter published their reasoning. Many do,
+// and a committee weighing constitutionality should be able to read it.
+func (v ChainVote) HasRationale() bool { return v.RationaleURL != "" }
+
+// VotesByRole returns the votes cast on an action by one voter role — "DRep" or
+// "SPO". Voters who published a rationale come first: a committee is here to
+// read reasoning, not to count heads.
+func (d *DB) VotesByRole(proposalID, role string) ([]ChainVote, error) {
+	rows, err := d.sql.Query(`
+SELECT cc_hot_id, COALESCE(vote,''), COALESCE(rationale_url,''), COALESCE(block_time,0)
+FROM cc_votes
+WHERE proposal_id = ? AND voter_role = ?
+ORDER BY CASE WHEN COALESCE(rationale_url,'') <> '' THEN 0 ELSE 1 END,
+         vote, cc_hot_id`, proposalID, role)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ChainVote
+	for rows.Next() {
+		var v ChainVote
+		if err := rows.Scan(&v.VoterID, &v.Vote, &v.RationaleURL, &v.BlockTime); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
 	}
 	return out, rows.Err()
 }

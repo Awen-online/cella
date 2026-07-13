@@ -72,6 +72,17 @@ func (n Network) ExplorerTx(txHash string) string {
 	return n.explorerBase() + "/transactions/" + txHash
 }
 
+// ExplorerDRep links to a delegate representative. drepID is the bech32 form
+// Koios reports as voter_id.
+func (n Network) ExplorerDRep(drepID string) string {
+	return n.explorerBase() + "/dreps/" + drepID
+}
+
+// ExplorerPool links to a stake pool.
+func (n Network) ExplorerPool(poolID string) string {
+	return n.explorerBase() + "/pools/" + poolID
+}
+
 func (n Network) explorerBase() string {
 	switch n {
 	case Preprod:

@@ -98,6 +98,32 @@ const payloadHTML = `
 
 // votingContextHTML shows how the rest of the ecosystem is voting.
 const votingContextHTML = `
+{{define "ballots"}}
+{{if .Votes}}
+<details class="vc-ballots">
+  <summary>
+    <span class="vc-open">See how each one voted</span>
+    {{if .Rationales}}<span class="vc-rat">{{.Rationales}} published a rationale</span>
+    {{else}}<span class="vc-rat none">none published a rationale</span>{{end}}
+  </summary>
+  <div class="vc-list">
+    {{range .Votes}}
+    <div class="vc-row">
+      <span class="vc-v {{.Class}}">{{.Vote}}</span>
+      <a class="vc-id" href="{{.Explorer}}" target="_blank" rel="noopener noreferrer" title="{{.VoterID}}">{{.Short}}</a>
+      {{if .HasRationale}}
+      <a class="vc-why" href="{{.Rationale}}" target="_blank" rel="noopener noreferrer nofollow">Read their rationale &#8599;</a>
+      {{else}}
+      <span class="vc-why none">no rationale</span>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+  <div class="vc-ext">Rationales are published by the voters themselves and hosted off-chain. Cella links them; it does not vouch for them.</div>
+</details>
+{{end}}
+{{end}}
+
 {{define "votingcontext"}}
 {{if .HasSummary}}
 {{with .Summary}}
@@ -118,6 +144,7 @@ const votingContextHTML = `
       <span class="a">{{.DRepAbstain}} abstained</span>
       <span class="vc-cast">({{.DRepYesVotes}} yes / {{.DRepNoVotes}} no by count)</span>
     </div>
+    {{template "ballots" (dict "Votes" $.DRepBallots "Rationales" $.DRepRationales)}}
     {{else}}<div class="muted">No delegate representative has voted yet.</div>{{end}}
   </div>
 
@@ -134,6 +161,7 @@ const votingContextHTML = `
       <span class="a">{{.PoolAbstain}} abstained</span>
       <span class="vc-cast">({{.PoolYesVotes}} yes / {{.PoolNoVotes}} no by count)</span>
     </div>
+    {{template "ballots" (dict "Votes" $.PoolBallots "Rationales" $.PoolRationales)}}
     {{else}}<div class="muted">No stake pool operator has voted yet. Not every action type takes an SPO vote.</div>{{end}}
   </div>
 
