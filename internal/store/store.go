@@ -81,6 +81,17 @@ CREATE TABLE IF NOT EXISTS voting_group (
   synced_at INTEGER
 );
 
+-- The Constitutional Committee as the chain records it: who holds a seat, who
+-- has resigned, when each term ends. Read from /committee_info, never hardcoded
+-- — a static roster is quietly wrong the first time anyone resigns.
+CREATE TABLE IF NOT EXISTS committee (
+  cc_hot_id        TEXT PRIMARY KEY,
+  cc_cold_id       TEXT,
+  status           TEXT,        -- authorized | resigned | not_authorized
+  expiration_epoch INTEGER,
+  synced_at        INTEGER
+);
+
 -- The committee's final, citable rationale for its vote — the body of the
 -- CIP-136 document that is anchored on-chain alongside the vote.
 CREATE TABLE IF NOT EXISTS rationales (
@@ -129,6 +140,10 @@ func Open(path string) (*DB, error) {
 
 		// The ecosystem's stake-weighted verdict, as context for the committee's.
 		`ALTER TABLE governance_actions ADD COLUMN voting_summary TEXT`,
+
+		// The committee's own ratification threshold, as the chain sets it.
+		`ALTER TABLE network ADD COLUMN quorum_numerator INTEGER`,
+		`ALTER TABLE network ADD COLUMN quorum_denominator INTEGER`,
 	} {
 		if _, err := sdb.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			// Non-fatal: a fresh database already has the column.
@@ -662,6 +677,94 @@ SELECT key_hash, COALESCE(cert_hash,'') FROM voting_group ORDER BY position`)
 		g = append(g, id)
 	}
 	return g, rows.Err()
+}
+
+// SaveCommittee replaces the stored committee with what the chain reports. It
+// is a replacement, not a merge: a seat that has been removed on-chain must
+// disappear from Cella too, or the threshold's denominator would be wrong.
+func (d *DB) SaveCommittee(c koios.CommitteeInfo) error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM committee`); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`
+INSERT INTO committee (cc_hot_id, cc_cold_id, status, expiration_epoch, synced_at)
+VALUES (?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	now := time.Now().Unix()
+	for _, m := range c.Members {
+		var exp any
+		if m.ExpirationEpoch != nil {
+			exp = *m.ExpirationEpoch
+		}
+		// A resigned seat has no hot credential; key it on the cold one so it is
+		// still recorded rather than colliding on an empty primary key.
+		id := m.HotID
+		if id == "" {
+			id = "resigned:" + m.ColdID
+		}
+		if _, err := stmt.Exec(id, m.ColdID, m.Status, exp, now); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(`
+INSERT INTO network (id, quorum_numerator, quorum_denominator)
+VALUES (1, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  quorum_numerator=excluded.quorum_numerator,
+  quorum_denominator=excluded.quorum_denominator`,
+		c.QuorumNumerator, c.QuorumDenominator); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// Committee returns the stored committee and its quorum threshold. The members
+// list is empty until an ingest has read it, in which case Cella must not
+// pretend to know what the committee looks like.
+func (d *DB) Committee() (koios.CommitteeInfo, error) {
+	var c koios.CommitteeInfo
+
+	row := d.sql.QueryRow(`
+SELECT COALESCE(quorum_numerator,0), COALESCE(quorum_denominator,0) FROM network WHERE id = 1`)
+	if err := row.Scan(&c.QuorumNumerator, &c.QuorumDenominator); err != nil && err != sql.ErrNoRows {
+		return c, err
+	}
+
+	rows, err := d.sql.Query(`
+SELECT cc_hot_id, COALESCE(cc_cold_id,''), COALESCE(status,''), expiration_epoch
+FROM committee ORDER BY status, cc_hot_id`)
+	if err != nil {
+		return c, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var m koios.CommitteeSeat
+		var exp sql.NullInt64
+		if err := rows.Scan(&m.HotID, &m.ColdID, &m.Status, &exp); err != nil {
+			return c, err
+		}
+		if exp.Valid {
+			e := exp.Int64
+			m.ExpirationEpoch = &e
+		}
+		if strings.HasPrefix(m.HotID, "resigned:") {
+			m.HotID = ""
+		}
+		c.Members = append(c.Members, m)
+	}
+	return c, rows.Err()
 }
 
 // Rationale is the committee's authored rationale for its vote on an action —

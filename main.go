@@ -103,6 +103,18 @@ func runIngest(cfg config.Config, args []string) error {
 		return err
 	}
 
+	// Who sits on the Constitutional Committee, and what it takes for them to
+	// ratify. Members resign and terms expire; a hardcoded roster is quietly
+	// wrong the first time either happens.
+	if ci, err := kc.Committee(ctx); err != nil {
+		log.Printf("  warn: committee: %v", err)
+	} else if err := db.SaveCommittee(ci); err != nil {
+		return err
+	} else {
+		log.Printf("committee: %d seats (%d authorized), quorum %s — %d Yes needed to ratify",
+			len(ci.Members), len(ci.Authorized()), ci.Quorum(), ci.YesNeeded())
+	}
+
 	// Who may sign the committee's vote, and therefore what quorum is. The chain
 	// is the authority; a warning is enough if we cannot reach it, because
 	// everything else in Cella still works without it.

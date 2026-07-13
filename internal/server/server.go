@@ -142,9 +142,17 @@ type actionView struct {
 	MotivationHTML        template.HTML
 	ProposerRationaleHTML template.HTML
 
-	// Full Constitutional Committee roster for this action (all seats; a seat
-	// with Voted=false is shown grayed as awaiting a vote).
-	Committee []CommitteeSeat
+	// The Constitutional Committee as the chain seats it, and the threshold it
+	// must clear. YesNeeded is the quorum fraction of the authorized seats,
+	// rounded up — with 7 seats and a 2/3 quorum it is 5, not 4, and a committee
+	// that rounded down would believe it had ratified something the chain
+	// rejects.
+	Committee      []CommitteeSeat
+	Seats          int
+	YesNeeded      int
+	QuorumFraction string
+	ThresholdKnown bool
+	ThresholdMet   bool
 
 	// The signed-in delegate's own recorded position, which drives the ballot
 	// form. YouRecorded is false until they have actually taken one.
@@ -166,6 +174,7 @@ type actionView struct {
 type CommitteeSeat struct {
 	Name       string
 	Credential string
+	TermEnds   int64 // epoch the seat's term expires
 	Voted      bool
 	Vote       string
 	Rationale  string
@@ -366,25 +375,51 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	av.MotivationHTML = mdHTML(a.Motivation)
 	av.ProposerRationaleHTML = mdHTML(a.ProposerRationale)
 
-	// Full committee roster: every seat, voted or awaiting.
+	// The Constitutional Committee, as the chain currently seats it. Resigned
+	// members are excluded: their vote does not count, and counting them in the
+	// denominator would understate the threshold.
+	ci, err := s.db.Committee()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	byCred := make(map[string]store.VoteRow, len(av.Votes))
 	for _, v := range av.Votes {
 		byCred[v.VoterID] = v
 	}
-	seen := make(map[string]bool, len(ccCommittee))
-	for _, m := range ccCommittee {
-		seat := CommitteeSeat{Name: m.Name, Credential: m.Credential}
-		if v, ok := byCred[m.Credential]; ok {
+	seen := map[string]bool{}
+	for _, m := range ci.Authorized() {
+		seat := CommitteeSeat{
+			Name:       ccMemberName(m.HotID),
+			Credential: m.HotID,
+		}
+		if m.ExpirationEpoch != nil {
+			seat.TermEnds = *m.ExpirationEpoch
+		}
+		if v, ok := byCred[m.HotID]; ok {
 			seat.Voted, seat.Vote, seat.Rationale = true, v.Vote, v.RationaleURL
 		}
-		seen[m.Credential] = true
+		seen[m.HotID] = true
 		av.Committee = append(av.Committee, seat)
 	}
+	// A vote from a credential the roster does not know about is still a vote,
+	// and hiding it would misreport the tally.
 	for _, v := range av.Votes {
 		if !seen[v.VoterID] {
-			av.Committee = append(av.Committee, CommitteeSeat{Name: ccMemberName(v.VoterID), Credential: v.VoterID, Voted: true, Vote: v.Vote, Rationale: v.RationaleURL})
+			av.Committee = append(av.Committee, CommitteeSeat{
+				Name: ccMemberName(v.VoterID), Credential: v.VoterID,
+				Voted: true, Vote: v.Vote, Rationale: v.RationaleURL,
+			})
 		}
 	}
+
+	// The threshold the committee must clear, and whether it has.
+	av.Seats = len(ci.Authorized())
+	av.YesNeeded = ci.YesNeeded()
+	av.QuorumFraction = ci.Quorum()
+	av.ThresholdKnown = av.YesNeeded > 0
+	av.ThresholdMet = av.ThresholdKnown && av.Yes >= av.YesNeeded
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.dtpl.Execute(w, av); err != nil {
@@ -746,6 +781,14 @@ const detailHTML = `<!doctype html>
   .votes tr.pending { opacity:.42; }
   .await { color:var(--muted); font-family:'Cinzel',serif; font-size:11px; letter-spacing:.06em; text-transform:uppercase; }
   .seatsof { color:var(--muted); font-size:13px; }
+  .thresh { margin-bottom:12px; padding:9px 13px; border-radius:9px; border:1px solid rgba(245,210,122,.4); background:rgba(245,210,122,.06); font-size:14px; color:var(--body); }
+  .thresh b { color:var(--goldb); }
+  .thresh.met { border-color:rgba(75,189,136,.45); background:rgba(75,189,136,.07); }
+  .thresh.met b { color:var(--green); }
+  .thresh.unknown { border-color:rgba(139,147,184,.3); background:none; color:var(--muted); font-style:italic; }
+  .thresh .tof { color:var(--muted); font-size:12.5px; }
+  .thresh code { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:12px; color:var(--goldb); font-style:normal; }
+  .term { color:var(--muted); font-size:10.5px; font-family:'EB Garamond',serif; }
   .chpos { font-size:14px; color:var(--muted); margin-bottom:14px; }
   .chpos b { color:var(--ivory); }
   .chpos .y { color:var(--green); } .chpos .n { color:var(--red); } .chpos .a { color:var(--muted); }
@@ -921,7 +964,19 @@ const detailHTML = `<!doctype html>
   </div>
 
   <div class="card">
-    <h2>Constitutional Committee &mdash; {{len .Committee}} seats</h2>
+    <h2>Constitutional Committee {{if .Seats}}&mdash; {{.Seats}} authorized seats{{end}}</h2>
+    {{if .ThresholdKnown}}
+    <div class="thresh {{if .ThresholdMet}}met{{end}}">
+      {{if .ThresholdMet}}
+        <b>&#10003; Threshold met</b> &mdash; {{.Yes}} of the {{.YesNeeded}} Yes votes needed to ratify.
+      {{else}}
+        <b>{{.Yes}} of {{.YesNeeded}}</b> Yes votes needed to ratify
+        <span class="tof">({{.QuorumFraction}} of {{.Seats}} authorized seats, rounded up)</span>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="thresh unknown">The committee's threshold is unknown &mdash; run <code>cella ingest</code> to read it from the chain rather than guessing it.</div>
+    {{end}}
     <div class="tally"><b class="y">{{.Yes}} Yes</b> · <b class="n">{{.No}} No</b> · <b class="a">{{.Abstain}} Abstain</b> <span class="seatsof">of {{len .Committee}} seats</span></div>
     <table class="votes">
       <thead><tr><th>Vote</th><th>Committee member</th><th>Rationale</th></tr></thead>
@@ -929,7 +984,7 @@ const detailHTML = `<!doctype html>
         {{range .Committee}}
         <tr class="{{if not .Voted}}pending{{end}}">
           <td class="vote">{{if .Voted}}<b class="{{if eq .Vote "Yes"}}y{{else if eq .Vote "No"}}n{{else}}a{{end}}">{{.Vote}}</b>{{else}}<span class="await">Awaiting</span>{{end}}</td>
-          <td class="cc">{{if .Name}}<span class="ccname">{{.Name}}</span><br>{{end}}{{.Credential}}</td>
+          <td class="cc">{{if .Name}}<span class="ccname">{{.Name}}</span><br>{{end}}{{.Credential}}{{if .TermEnds}}<br><span class="term">term ends epoch {{.TermEnds}}</span>{{end}}</td>
           <td>{{if .Rationale}}<a href="{{.Rationale}}" rel="noopener">rationale ↗</a>{{else}}<span class="muted">—</span>{{end}}</td>
         </tr>
         {{end}}
