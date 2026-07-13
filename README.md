@@ -53,9 +53,21 @@ cd cella
 go mod tidy         # fetch dependencies (first build only)
 go build -o cella .
 
-./cella ingest      # pull governance actions from Koios into ./cella.db
+./cella ingest      # pull governance actions, votes and the committee from the chain
 ./cella serve       # then open http://localhost:8080
 ```
+
+Everything is a flag, so nothing needs exporting to try something:
+
+```bash
+./cella ingest -n preprod -limit 25   # the governance testnet
+./cella serve  -n preprod -demo       # look around without a wallet
+./cella --help                        # every flag
+```
+
+A flag beats an environment variable, which beats the default — so the same
+settings work for a person at a terminal and for a systemd unit. An unrecognised
+network is a startup error, never a silent mainnet.
 
 That's the whole install. No API key is required — Koios is a public, decentralized Cardano query layer.
 

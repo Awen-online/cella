@@ -44,8 +44,8 @@ func TestLoadDefaults(t *testing.T) {
 	if c.Addr != ":8080" {
 		t.Errorf("Addr = %q, want :8080", c.Addr)
 	}
-	if c.KoiosURL != "https://api.koios.rest/api/v1" {
-		t.Errorf("KoiosURL = %q, want the public Koios endpoint", c.KoiosURL)
+	if c.Koios() != "https://api.koios.rest/api/v1" {
+		t.Errorf("KoiosURL = %q, want the public Koios endpoint", c.Koios())
 	}
 
 	// The three that weaken or unlock things must default to off/empty.
@@ -102,8 +102,8 @@ func TestNetworkPicksKoios(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.KoiosURL != "https://preprod.koios.rest/api/v1" {
-		t.Errorf("preprod Koios = %q", c.KoiosURL)
+	if c.Koios() != "https://preprod.koios.rest/api/v1" {
+		t.Errorf("preprod Koios = %q", c.Koios())
 	}
 	if !c.Network.IsTestnet() {
 		t.Error("preprod did not report itself a testnet")
@@ -111,7 +111,7 @@ func TestNetworkPicksKoios(t *testing.T) {
 
 	t.Setenv("CELLA_NETWORK", "")
 	c, _ = Load()
-	if c.KoiosURL != "https://api.koios.rest/api/v1" || c.Network.IsTestnet() {
+	if c.Koios() != "https://api.koios.rest/api/v1" || c.Network.IsTestnet() {
 		t.Errorf("default is not mainnet: %+v", c)
 	}
 
@@ -119,7 +119,7 @@ func TestNetworkPicksKoios(t *testing.T) {
 	t.Setenv("CELLA_NETWORK", "preprod")
 	t.Setenv("KOIOS_URL", "http://localhost:8053/api/v1")
 	c, _ = Load()
-	if c.KoiosURL != "http://localhost:8053/api/v1" {
-		t.Errorf("KOIOS_URL override ignored: %q", c.KoiosURL)
+	if c.Koios() != "http://localhost:8053/api/v1" {
+		t.Errorf("KOIOS_URL override ignored: %q", c.Koios())
 	}
 }

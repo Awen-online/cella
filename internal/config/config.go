@@ -21,9 +21,10 @@ type Config struct {
 	// not merely in the data, with its explorer links still pointing at mainnet.
 	Network network.Network
 
-	// KoiosURL overrides the endpoint Network would choose. For a private or
-	// self-hosted Koios instance.
-	KoiosURL string
+	// KoiosOverride replaces the endpoint Network would choose — for a private or
+	// self-hosted Koios. Empty means "follow the network", which is what lets a
+	// --network flag change the endpoint without the caller restating it.
+	KoiosOverride string
 
 	// Secret keys the session cookies. When empty a random key is generated at
 	// startup, which is secure but ephemeral: sessions do not survive a restart.
@@ -86,10 +87,18 @@ func Load() (Config, error) {
 		LLMKey:     os.Getenv("CELLA_LLM_KEY"),
 	}
 
-	// KOIOS_URL, when given, wins — a private Koios is a legitimate thing to
-	// have. Otherwise the network decides.
-	c.KoiosURL = env("KOIOS_URL", net.KoiosURL())
+	c.KoiosOverride = os.Getenv("KOIOS_URL")
 	return c, nil
+}
+
+// Koios is the endpoint to talk to: the override when one was given, otherwise
+// whatever the network implies. Derived rather than stored, so changing the
+// network — from a flag, say — moves the endpoint with it.
+func (c Config) Koios() string {
+	if c.KoiosOverride != "" {
+		return c.KoiosOverride
+	}
+	return c.Network.KoiosURL()
 }
 
 func env(key, def string) string {

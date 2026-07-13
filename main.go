@@ -21,6 +21,7 @@ import (
 	"github.com/Awen-online/cella/internal/constitution"
 	"github.com/Awen-online/cella/internal/koios"
 	"github.com/Awen-online/cella/internal/llm"
+	"github.com/Awen-online/cella/internal/network"
 	"github.com/Awen-online/cella/internal/server"
 	"github.com/Awen-online/cella/internal/store"
 )
@@ -90,35 +91,80 @@ func main() {
 	}
 }
 
+// bind registers the flags a command accepts, defaulting each to whatever the
+// environment already said. So the precedence a reader would expect holds
+// without anyone having to think about it: flag beats env beats default.
+//
+// Environment variables are right for a deployment — a systemd unit, a
+// container. Flags are right for a person at a terminal, and a person at a
+// terminal should not have to export three variables to look at a testnet.
+func bind(fs *flag.FlagSet, cfg *config.Config) func() error {
+	netName := fs.String("network", cfg.Network.Label(), "cardano network: mainnet, preprod or preview")
+	fs.StringVar(netName, "n", *netName, "shorthand for -network")
+	fs.StringVar(&cfg.DBPath, "db", cfg.DBPath, "path to the SQLite database")
+	fs.StringVar(&cfg.BodyPath, "body", cfg.BodyPath, "path to the body JSON — who this instance belongs to")
+	fs.StringVar(&cfg.KoiosOverride, "koios", cfg.KoiosOverride, "override the network's Koios endpoint (private instance)")
+	fs.StringVar(&cfg.KoiosToken, "koios-token", cfg.KoiosToken, "optional Koios bearer token")
+
+	return func() error {
+		n, err := network.Parse(*netName)
+		if err != nil {
+			return err
+		}
+		cfg.Network = n
+		return nil
+	}
+}
+
 func usage() {
 	fmt.Fprint(os.Stderr, `cella — self-hostable Cardano Constitutional Committee governance
 
 usage:
-  cella ingest    pull governance actions + CC votes from Koios into the database
-  cella review    assess stored actions against the Constitution (bring your own LLM)
-  cella serve     start the web UI
-  cella version   print the version
+  cella ingest [flags]    pull governance actions, votes and the committee from the chain
+  cella review [flags]    assess stored actions against the Constitution (bring your own LLM)
+  cella serve  [flags]    start the web UI
+  cella version           print the version
 
-configuration (environment):
-  CELLA_NETWORK    mainnet | preprod | preview   (default mainnet)
-  CELLA_DB         path to the SQLite database   (default ./cella.db)
-  CELLA_ADDR       web server listen address     (default :8080)
-  CELLA_SECRET     signs session cookies         (default: random key per start)
-  CELLA_DEMO       enable roster sign-in — NO AUTH; never on a reachable instance
-  CELLA_BODY       path to the body's JSON (who this instance belongs to; logo alongside)
-  CELLA_HOT_NFT_ADDR  hot NFT script address — its datum sets the voting group + quorum
-  KOIOS_URL        override the network's Koios endpoint (for a private instance)
-  KOIOS_TOKEN      optional Koios bearer token
-  CELLA_LLM_URL    OpenAI-compatible endpoint    (e.g. http://localhost:11434/v1 for Ollama)
-  CELLA_LLM_MODEL  model name                    (e.g. gpt-4o-mini, llama3.1)
-  CELLA_LLM_KEY    optional API key (local models need none)
+common flags (every command):
+  -n, -network   mainnet | preprod | preview        (default mainnet)
+  -db            path to the SQLite database        (default ./cella.db)
+  -body          path to the body JSON              (default: the built-in Cardano Curia)
+  -koios         override the network's Koios endpoint
+  -koios-token   optional Koios bearer token
+
+  cella ingest -limit N        how many actions to pull   (default 100)
+               -hot-nft ADDR   the hot NFT script address (sets the voting group and quorum)
+
+  cella serve  -addr HOST:PORT listen address              (default :8080)
+               -secret KEY     signs session cookies       (default: random per start)
+               -demo           enable roster sign-in — NO AUTH; local demos only
+
+  cella review -limit N        how many actions to review  (default 20)
+               -force          re-review actions that already have one
+               -llm-url URL    OpenAI-compatible endpoint  (e.g. http://localhost:11434/v1)
+               -llm-model NAME model name                  (e.g. gpt-4o-mini, llama3.1)
+               -llm-key KEY    optional API key            (local models need none)
+
+examples:
+  cella ingest -n preprod -limit 25
+  cella serve  -n preprod -demo
+  cella serve  -body body/curia.json -secret $(openssl rand -hex 32)
+
+every flag can also be set by environment variable — CELLA_NETWORK, CELLA_DB,
+CELLA_BODY, CELLA_SECRET, CELLA_DEMO, CELLA_HOT_NFT_ADDR, KOIOS_URL, KOIOS_TOKEN,
+CELLA_LLM_URL, CELLA_LLM_MODEL, CELLA_LLM_KEY. A flag beats the environment.
 `)
 }
 
 func runIngest(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
+	resolve := bind(fs, &cfg)
 	limit := fs.Int("limit", 100, "max governance actions to fetch")
+	fs.StringVar(&cfg.HotNFTAddr, "hot-nft", cfg.HotNFTAddr, "hot NFT script address — its datum sets the voting group and quorum")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := resolve(); err != nil {
 		return err
 	}
 
@@ -129,8 +175,8 @@ func runIngest(cfg config.Config, args []string) error {
 	defer db.Close()
 
 	ctx := context.Background()
-	kc := koios.New(cfg.KoiosURL, cfg.KoiosToken)
-	log.Printf("network: %s — %s", cfg.Network.Label(), cfg.KoiosURL)
+	kc := koios.New(cfg.Koios(), cfg.KoiosToken)
+	log.Printf("network: %s — %s", cfg.Network.Label(), cfg.Koios())
 
 	// The chain states an action's expiration as an epoch number. Capture the
 	// network's genesis parameters so the web UI can turn that into a real
@@ -294,8 +340,14 @@ func browseURL(addr string) string {
 
 func runServe(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	resolve := bind(fs, &cfg)
 	addr := fs.String("addr", cfg.Addr, "listen address")
+	fs.StringVar(&cfg.Secret, "secret", cfg.Secret, "signs session cookies (default: a random key per start)")
+	fs.BoolVar(&cfg.Demo, "demo", cfg.Demo, "enable roster sign-in — NO AUTHENTICATION; local demos only")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := resolve(); err != nil {
 		return err
 	}
 
@@ -325,12 +377,12 @@ func runServe(cfg config.Config, args []string) error {
 	}
 
 	if cfg.Secret == "" {
-		log.Printf("warning: CELLA_SECRET is not set — using a random session key; sessions will not survive a restart")
+		log.Printf("warning: no session secret — using a random key; sessions will not survive a restart (-secret, or CELLA_SECRET)")
 	}
 	if cfg.Demo {
-		log.Printf("WARNING: CELLA_DEMO is set — anyone who can reach this instance may enter as any")
-		log.Printf("WARNING: delegate, cast votes in their name, and author the committee's rationale.")
-		log.Printf("WARNING: Do not expose this instance to a network.")
+		log.Printf("WARNING: demo mode — anyone who can reach this instance may enter as any")
+		log.Printf("WARNING: member, cast votes in their name, and author the committee's rationale.")
+		log.Printf("WARNING: There is no authentication. Do not expose this instance to a network.")
 	}
 
 	if cfg.Network.IsTestnet() {
@@ -350,15 +402,22 @@ func runServe(cfg config.Config, args []string) error {
 
 func runReview(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("review", flag.ExitOnError)
+	resolve := bind(fs, &cfg)
 	limit := fs.Int("limit", 20, "max actions to review")
 	force := fs.Bool("force", false, "re-review actions that already have a review")
+	fs.StringVar(&cfg.LLMURL, "llm-url", cfg.LLMURL, "OpenAI-compatible endpoint")
+	fs.StringVar(&cfg.LLMModel, "llm-model", cfg.LLMModel, "model name")
+	fs.StringVar(&cfg.LLMKey, "llm-key", cfg.LLMKey, "optional API key")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := resolve(); err != nil {
 		return err
 	}
 
 	if cfg.LLMURL == "" || cfg.LLMModel == "" {
-		return fmt.Errorf("no model configured: set CELLA_LLM_URL and CELLA_LLM_MODEL " +
-			"(e.g. a local Ollama at http://localhost:11434/v1 with model llama3.1)")
+		return fmt.Errorf("no model configured: pass -llm-url and -llm-model " +
+			"(e.g. -llm-url http://localhost:11434/v1 -llm-model llama3.1 for a local Ollama)")
 	}
 
 	db, err := store.Open(cfg.DBPath)
