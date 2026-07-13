@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/Awen-online/cella/internal/cardano"
 	"github.com/Awen-online/cella/internal/config"
 	"github.com/Awen-online/cella/internal/constitution"
 	"github.com/Awen-online/cella/internal/koios"
@@ -100,6 +101,15 @@ func runIngest(cfg config.Config, args []string) error {
 		return err
 	}
 
+	// Who may sign the committee's vote, and therefore what quorum is. The chain
+	// is the authority; a warning is enough if we cannot reach it, because
+	// everything else in Cella still works without it.
+	if cfg.HotNFTAddr != "" {
+		if err := syncVotingGroup(ctx, kc, db, cfg.HotNFTAddr); err != nil {
+			log.Printf("  warn: hot NFT voting group: %v", err)
+		}
+	}
+
 	actions, err := kc.GovernanceActions(ctx, *limit)
 	if err != nil {
 		return err
@@ -125,6 +135,24 @@ func runIngest(cfg config.Config, args []string) error {
 	}
 
 	log.Printf("ingested %d governance actions (%d written) and %d CC votes into %s", len(actions), na, votesTotal, cfg.DBPath)
+	return nil
+}
+
+// syncVotingGroup reads the hot NFT's inline datum and records who the chain
+// will accept vote signatures from.
+func syncVotingGroup(ctx context.Context, kc *koios.Client, db *store.DB, addr string) error {
+	datum, err := kc.HotNFTDatum(ctx, addr)
+	if err != nil {
+		return err
+	}
+	group, err := cardano.DecodeHotDatum(datum)
+	if err != nil {
+		return err
+	}
+	if err := db.SaveVotingGroup(group); err != nil {
+		return err
+	}
+	log.Printf("hot NFT voting group: %d delegates, quorum %d", len(group.Distinct()), group.Quorum())
 	return nil
 }
 

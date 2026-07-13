@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Awen-online/cella/internal/cardano"
 	"github.com/Awen-online/cella/internal/koios"
 
 	_ "modernc.org/sqlite"
@@ -66,6 +67,17 @@ CREATE TABLE IF NOT EXISTS network (
   system_start INTEGER,
   epoch_length INTEGER,
   fetched_at   INTEGER
+);
+
+-- The hot NFT datum's voting group: who the chain will accept vote signatures
+-- from, and therefore what quorum actually is. Read from the chain at ingest,
+-- never invented locally — a quorum Cella computed for itself could disagree
+-- with the validator, which is worse than showing none.
+CREATE TABLE IF NOT EXISTS voting_group (
+  key_hash  TEXT PRIMARY KEY,
+  cert_hash TEXT,
+  position  INTEGER,
+  synced_at INTEGER
 );
 
 -- The committee's final, citable rationale for its vote — the body of the
@@ -472,6 +484,58 @@ func (d *DB) Network() (koios.GenesisParams, error) {
 		return koios.GenesisParams{}, err
 	}
 	return p, nil
+}
+
+// SaveVotingGroup replaces the stored voting group with what the chain says.
+// It is a replacement, not a merge: a delegate rotated out of the hot NFT datum
+// must disappear from Cella too, or Cella would keep counting a signature the
+// validator no longer accepts.
+func (d *DB) SaveVotingGroup(g cardano.VotingGroup) error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM voting_group`); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`
+INSERT INTO voting_group (key_hash, cert_hash, position, synced_at) VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	now := time.Now().Unix()
+	for i, id := range g {
+		if _, err := stmt.Exec(id.KeyHash, id.CertHash, i, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// VotingGroup returns the stored voting group, in datum order. It is empty
+// until an ingest has read the hot NFT — in which case Cella must not pretend
+// to know what quorum is.
+func (d *DB) VotingGroup() (cardano.VotingGroup, error) {
+	rows, err := d.sql.Query(`
+SELECT key_hash, COALESCE(cert_hash,'') FROM voting_group ORDER BY position`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var g cardano.VotingGroup
+	for rows.Next() {
+		var id cardano.VotingIdentity
+		if err := rows.Scan(&id.KeyHash, &id.CertHash); err != nil {
+			return nil, err
+		}
+		g = append(g, id)
+	}
+	return g, rows.Err()
 }
 
 // Rationale is the committee's authored rationale for its vote on an action —

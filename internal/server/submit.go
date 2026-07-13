@@ -13,7 +13,7 @@ type submitView struct {
 	store.ActionRow
 	Decision string   // Yes | No | Abstain — the committee's resolved vote
 	Tally    tally    // how the delegates split to get there
-	Members  []Member // CC cold-key co-signers (the body's delegates)
+	Members  []Member // the body's delegates (fallback when the voting group is unknown)
 
 	// The rationale that is anchored with the vote. AnchorHash is real: it is
 	// the blake2b-256 of the exact bytes served at /rationale/{slug}.jsonld, and
@@ -23,15 +23,18 @@ type submitView struct {
 	Ready      bool
 	Problem    string
 	AnchorHash string
+
+	// Quorum is what the chain requires, from the hot NFT datum.
+	Quorum Quorum
 }
 
 // handleSubmit renders the on-chain submission flow: anchor the rationale,
-// compose the committee vote, build the transaction, collect the CC cold-key
-// signatures, and submit. Modelled on the credential-manager / hot-NFT multisig
-// runbook (orchestrator-cli + cardano-cli conway).
+// compose the committee vote, build the transaction, collect the delegates'
+// voting-key signatures, and submit. Modelled on the credential-manager /
+// hot-NFT multisig runbook (orchestrator-cli + cardano-cli conway).
 //
 // The rationale and its anchor hash are real artifacts. The transaction is not:
-// nothing is broadcast, because that requires the committee's cold keys.
+// nothing is broadcast, because that requires the delegates' voting keys.
 func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	slug := strings.TrimPrefix(r.URL.Path, "/submit/")
 	if slug == "" {
@@ -54,11 +57,18 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	q, err := s.quorumFor(a.ProposalID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	v := submitView{
 		ActionRow: a,
 		Decision:  t.Decision(),
 		Tally:     t,
 		Members:   s.body.Members,
+		Quorum:    q,
 	}
 
 	// A committee submits its reasoning with its vote. Without an anchorable
@@ -119,6 +129,12 @@ const submitHTML = `<!doctype html>
   .st .t { font-family:'Cinzel',serif; color:var(--ivory); font-size:14px; letter-spacing:.03em; }
   .st .d { color:var(--muted); font-size:13.5px; margin-top:3px; }
   .st .cmd { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11.5px; color:var(--goldb); margin-top:7px; background:var(--forum); border-radius:7px; padding:7px 10px; overflow-x:auto; white-space:pre; }
+  .qsum { margin-top:9px; font-size:13.5px; color:var(--muted); }
+  .qsum b { color:var(--goldb); }
+  .qsum.met b { color:var(--green); }
+  .qsum .qof { display:block; font-size:12.5px; margin-top:2px; }
+  .qsum.unknown { color:var(--muted); font-style:italic; line-height:1.55; }
+  .qsum code { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11.5px; color:var(--goldb); font-style:normal; }
   .signers { display:flex; flex-wrap:wrap; gap:8px; margin-top:9px; }
   .signer { font-size:12px; border:1px solid rgba(201,137,42,.3); border-radius:999px; padding:3px 11px; color:var(--muted); }
   .signer.signed { color:var(--green); border-color:rgba(75,189,136,.5); }
@@ -151,7 +167,7 @@ const submitHTML = `<!doctype html>
   <div class="decision">Committee decision from the chamber: <span class="pill {{.Decision}}">{{.Decision}}</span>
     <span class="split">from <span class="y">{{.Tally.Yes}} Yes</span> · <span class="n">{{.Tally.No}} No</span> · <span class="a">{{.Tally.Abstain}} Abstain</span>{{if .Tally.DidNotVote}} · {{.Tally.DidNotVote}} awaiting{{end}}</span>
   </div>
-  <div class="demo-banner"><b>The rationale and its anchor hash below are real</b> — the same bytes and the same hash a committee would anchor. The transaction is not: this walks the credential-manager / hot-NFT multisig flow without broadcasting, because that requires the CC cold keys.</div>
+  <div class="demo-banner"><b>The rationale and its anchor hash below are real</b> — the same bytes and the same hash a committee would anchor. The transaction is not: this walks the credential-manager / hot-NFT multisig flow without broadcasting, because that requires the delegates' voting keys.</div>
 
   {{if not .Ready}}
   <div class="blocked">
@@ -189,18 +205,32 @@ const submitHTML = `<!doctype html>
       <div class="dot">3</div>
       <div>
         <div class="t">Build the transaction</div>
-        <div class="d">Assemble the tx requiring the committee's cold-key signers.</div>
-        <div class="cmd">cardano-cli conway transaction build --tx-in $HOT_NFT_UTXO --required-signer-hash &lt;cc-cold-1&gt; ...</div>
+        <div class="d">Assemble the tx spending the hot NFT UTxO, requiring the voting group's signers.</div>
+        <div class="cmd">cardano-cli conway transaction build --tx-in $HOT_NFT_UTXO   --required-signer-hash &lt;voting-key-hash&gt; ... --vote-script-file hot/credential.plutus</div>
       </div>
     </div>
     <div class="st" data-i="3">
       <div class="dot">4</div>
       <div>
-        <div class="t">Collect CC cold-key signatures</div>
-        <div class="d">Each delegate co-signs with their cold key (multisig).</div>
+        <div class="t">Collect the voting-key signatures</div>
+        <div class="d">Each delegate in the hot NFT's voting group co-signs the transaction with their <b>voting key</b>. The cold keys stay offline: they authorize and rotate the hot credential, they do not cast votes.</div>
+        {{if .Quorum.Known}}
+        <div class="qsum {{if .Quorum.Met}}met{{end}}">
+          Quorum: <b>{{.Quorum.Have}} of {{.Quorum.Need}}</b> required signatures
+          <span class="qof">(the chain requires {{.Quorum.Need}} of the {{.Quorum.Size}} delegates in the voting group)</span>
+        </div>
+        <div class="signers" id="signers">
+          {{range .Quorum.Signers}}<span class="signer signed" data-name="{{.}}">&#10003; {{.}}</span>{{end}}
+          {{range .Quorum.Missing}}<span class="signer" data-name="{{.}}">{{.}}</span>{{end}}
+        </div>
+        {{else}}
+        <div class="qsum unknown">
+          The voting group is unknown — Cella has not read the hot NFT datum. Set <code>CELLA_HOT_NFT_ADDR</code> and run <code>cella ingest</code>, and quorum will come from the chain rather than from a guess.
+        </div>
         <div class="signers" id="signers">
           {{range .Members}}<span class="signer" data-name="{{.Name}}">{{.Name}}</span>{{end}}
         </div>
+        {{end}}
       </div>
     </div>
     <div class="st" data-i="4">
@@ -214,7 +244,7 @@ const submitHTML = `<!doctype html>
   </div>
 
   <div class="actions">
-    <button class="go" id="go" {{if not .Ready}}disabled{{end}}>Sign with CC cold keys &amp; submit (demo)</button>
+    <button class="go" id="go" {{if not .Ready}}disabled{{end}}>Sign with the voting keys &amp; submit (demo)</button>
   </div>
 
   <div class="result" id="result">
@@ -243,7 +273,7 @@ const submitHTML = `<!doctype html>
     for (var i = 0; i < steps.length; i++) {
       steps[i].classList.add('active');
       steps[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
-      if (i === 3) { // cold-key signatures
+      if (i === 3) { // voting-key signatures
         for (var j = 0; j < signers.length; j++) { await wait(520); signers[j].classList.add('signed'); }
       } else {
         await wait(950);

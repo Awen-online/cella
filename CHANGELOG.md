@@ -17,6 +17,8 @@ All notable changes to Cella are documented here. The format is based on [Keep a
 - **On-chain submission flow** — walks the credential-manager / hot-NFT multisig path (anchor, compose, build, co-sign, submit).
 - Initial public repository: README, governance docs (CONTRIBUTING, CODE_OF_CONDUCT, GOVERNANCE, MAINTAINERS, SUPPORT), SECURITY policy, Apache-2.0 LICENSE, CI workflow, and Dependabot configuration.
 
+- **Quorum comes from the chain.** Cella reads the hot NFT's inline datum (`CELLA_HOT_NFT_ADDR`) to learn who may actually sign the committee's vote, and shows quorum against that — never against its own roster. The rule is the validator's: **ceil(n/2)** distinct voting keys, so a group of four needs two signatures, not three. Only *signed* positions count towards it, because an unsigned one is a database row and not a signature the chain will accept. With no datum read, Cella says quorum is unknown rather than guessing.
+
 - **Delegates sign their positions.** A recorded vote used to be only as trustworthy as the session cookie that recorded it. A delegate now signs their position with their Cardano wallet (CIP-30), over a plain-language message their wallet displays in full — the body, the action, the vote and the rationale are all inside the signature. The server composes that message and rebuilds it independently to verify, so nothing the browser claims was signed is trusted: a signature cannot be lifted onto a different action, altered after the fact, or used to record a position in another delegate's name. The chamber shows signed and unsigned positions distinctly.
 
 - **Deadline countdowns.** Governance actions expire, and an action that expires unvoted is an abstention the committee never chose — so the clock is now the first column on the dashboard, with quorum progress beside it. Urgency is colour-coded (under two days is critical, under five is soon) and the countdown ticks live so a page left open does not go quietly stale.
@@ -25,6 +27,9 @@ All notable changes to Cella are documented here. The format is based on [Keep a
 
 ### Fixed
 - **Fixed: every action claimed to have expired in 1970.** The chain states an action's expiration as an epoch *number*, but Cella formatted it as a Unix timestamp — so `epoch 648` rendered as `1970-01-01`, and the dashboard showed no expiry at all. Cella now captures the network's genesis parameters at ingest (via Koios `/genesis`) and derives a real wall-clock deadline: the end of the expiration epoch, since an action stays votable through it. The arithmetic is pinned in tests against Koios's own slot numbers, and where the genesis parameters are unavailable Cella shows the raw epoch and no countdown rather than inventing a date.
+
+### Fixed
+- **Fixed: the submission flow told delegates to use the wrong keys.** It instructed them to co-sign with their *cold* keys. The cold credential authorizes and rotates the hot credential and resigns the seat; it does not cast votes. Votes are signed with the delegates' **voting keys**, which satisfy the hot NFT script. Wrong guidance about which keys to bring out of cold storage is the worst kind of wrong, so the wizard, its commands and its button now name the voting keys throughout.
 
 ### Changed
 - **The chamber shows only real positions.** Member stances were previously generated deterministically from the proposal id to illustrate the flow. They are gone: the chamber now shows exactly what delegates have recorded, and a delegate who has not voted is shown as awaiting rather than being given an invented opinion. The committee's decision, its internal split, and the submission flow all derive from recorded votes alone, and a tie abstains rather than being resolved into a mandate.

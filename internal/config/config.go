@@ -32,6 +32,13 @@ type Config struct {
 	// whose addresses are not real and so can authenticate nobody.
 	RosterPath string
 
+	// HotNFTAddr is the script address holding the committee's hot NFT. Its
+	// inline datum names the voting group — who may sign the committee's vote —
+	// and therefore what quorum actually is. Cella reads it from the chain
+	// rather than trusting local configuration, because the validator, not
+	// Cella, decides whether a vote transaction is accepted.
+	HotNFTAddr string
+
 	// Constitutionality review — bring your own model. Any OpenAI-compatible
 	// endpoint (OpenAI, OpenRouter, Groq, vLLM, LM Studio, local Ollama).
 	LLMURL   string // e.g. https://api.openai.com/v1 or http://localhost:11434/v1
@@ -49,6 +56,7 @@ func Load() Config {
 		Secret:     os.Getenv("CELLA_SECRET"),
 		Demo:       truthy(os.Getenv("CELLA_DEMO")),
 		RosterPath: os.Getenv("CELLA_ROSTER"),
+		HotNFTAddr: os.Getenv("CELLA_HOT_NFT_ADDR"),
 		LLMURL:     os.Getenv("CELLA_LLM_URL"),
 		LLMModel:   os.Getenv("CELLA_LLM_MODEL"),
 		LLMKey:     os.Getenv("CELLA_LLM_KEY"),

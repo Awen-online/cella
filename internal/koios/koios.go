@@ -4,6 +4,7 @@
 package koios
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -217,6 +218,67 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("koios %s: %s", resp.Status, strings.TrimSpace(string(b)))
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// HotNFTDatum returns the raw inline datum (CBOR hex) of the UTxO holding the
+// committee's hot NFT — the datum that names who may cast the committee's vote.
+//
+// The hot NFT lives alone at its script address, so the address identifies it.
+// If more than one UTxO is there, something is wrong on-chain and Cella says so
+// rather than picking one and hoping.
+func (c *Client) HotNFTDatum(ctx context.Context, address string) (string, error) {
+	body, err := json.Marshal(map[string]any{"_addresses": []string{address}})
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/address_utxos", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", fmt.Errorf("koios %s: %s", resp.Status, strings.TrimSpace(string(b)))
+	}
+
+	var utxos []struct {
+		TxHash      string `json:"tx_hash"`
+		IsSpent     bool   `json:"is_spent"`
+		InlineDatum *struct {
+			Bytes string `json:"bytes"`
+		} `json:"inline_datum"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&utxos); err != nil {
+		return "", fmt.Errorf("decode address_utxos: %w", err)
+	}
+
+	var found []string
+	for _, u := range utxos {
+		if u.IsSpent || u.InlineDatum == nil || u.InlineDatum.Bytes == "" {
+			continue
+		}
+		found = append(found, u.InlineDatum.Bytes)
+	}
+
+	switch len(found) {
+	case 0:
+		return "", fmt.Errorf("no unspent UTxO with an inline datum at %s — is this the hot NFT address?", address)
+	case 1:
+		return found[0], nil
+	default:
+		return "", fmt.Errorf("%d UTxOs with inline datums at %s; the hot NFT should be alone at its address", len(found), address)
+	}
 }
 
 // Vote is a single on-chain vote cast on a governance action. VoterRole is one
