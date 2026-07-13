@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Awen-online/cella/internal/cardano"
+	"github.com/Awen-online/cella/internal/govaction"
 	"github.com/Awen-online/cella/internal/koios"
 
 	_ "modernc.org/sqlite"
@@ -114,6 +115,20 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE governance_actions ADD COLUMN abstract TEXT`,
 		`ALTER TABLE member_votes ADD COLUMN signature TEXT`,
 		`ALTER TABLE member_votes ADD COLUMN pubkey TEXT`,
+
+		// What the action actually does, and what became of it.
+		`ALTER TABLE governance_actions ADD COLUMN description TEXT`,
+		`ALTER TABLE governance_actions ADD COLUMN status TEXT`,
+		`ALTER TABLE governance_actions ADD COLUMN motivation TEXT`,
+		`ALTER TABLE governance_actions ADD COLUMN proposer_rationale TEXT`,
+		`ALTER TABLE governance_actions ADD COLUMN deposit TEXT`,
+		`ALTER TABLE governance_actions ADD COLUMN return_address TEXT`,
+		`ALTER TABLE governance_actions ADD COLUMN proposed_epoch INTEGER`,
+		`ALTER TABLE governance_actions ADD COLUMN meta_hash TEXT`,
+		`ALTER TABLE governance_actions ADD COLUMN meta_is_valid INTEGER`,
+
+		// The ecosystem's stake-weighted verdict, as context for the committee's.
+		`ALTER TABLE governance_actions ADD COLUMN voting_summary TEXT`,
 	} {
 		if _, err := sdb.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			// Non-fatal: a fresh database already has the column.
@@ -137,12 +152,18 @@ func (d *DB) UpsertActions(actions []koios.GovernanceAction) (int, error) {
 
 	stmt, err := tx.Prepare(`
 INSERT INTO governance_actions
-  (proposal_id, tx_hash, idx, type, title, abstract, meta_url, block_time, expiration, raw, ingested_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  (proposal_id, tx_hash, idx, type, title, abstract, meta_url, block_time, expiration, raw, ingested_at,
+   description, status, motivation, proposer_rationale, deposit, return_address, proposed_epoch,
+   meta_hash, meta_is_valid)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(proposal_id) DO UPDATE SET
   type=excluded.type, title=excluded.title, abstract=excluded.abstract,
   meta_url=excluded.meta_url, block_time=excluded.block_time,
-  expiration=excluded.expiration, raw=excluded.raw, ingested_at=excluded.ingested_at`)
+  expiration=excluded.expiration, raw=excluded.raw, ingested_at=excluded.ingested_at,
+  description=excluded.description, status=excluded.status, motivation=excluded.motivation,
+  proposer_rationale=excluded.proposer_rationale, deposit=excluded.deposit,
+  return_address=excluded.return_address, proposed_epoch=excluded.proposed_epoch,
+  meta_hash=excluded.meta_hash, meta_is_valid=excluded.meta_is_valid`)
 	if err != nil {
 		return 0, err
 	}
@@ -152,16 +173,40 @@ ON CONFLICT(proposal_id) DO UPDATE SET
 	n := 0
 	for _, a := range actions {
 		raw, _ := json.Marshal(a)
-		var exp any
+
+		var exp, proposed, valid any
 		if a.Expiration != nil {
 			exp = *a.Expiration
 		}
-		if _, err := stmt.Exec(a.ProposalID, a.TxHash, a.Index, a.Type, a.Title(), a.Abstract(), a.MetaURL, a.BlockTime, exp, string(raw), now); err != nil {
+		if a.ProposedEpoch != nil {
+			proposed = *a.ProposedEpoch
+		}
+		if a.MetaIsValid != nil {
+			valid = *a.MetaIsValid
+		}
+
+		if _, err := stmt.Exec(
+			a.ProposalID, a.TxHash, a.Index, a.Type, a.Title(), a.Abstract(), a.MetaURL,
+			a.BlockTime, exp, string(raw), now,
+			string(a.Description), string(a.Status()), a.Motivation(), a.Rationale(),
+			a.Deposit.String(), a.ReturnAddress, proposed, a.MetaHash, valid,
+		); err != nil {
 			return n, err
 		}
 		n++
 	}
 	return n, tx.Commit()
+}
+
+// SaveVotingSummary records the ecosystem's stake-weighted tally for an action.
+func (d *DB) SaveVotingSummary(proposalID string, s koios.VotingSummary) error {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	_, err = d.sql.Exec(`UPDATE governance_actions SET voting_summary = ? WHERE proposal_id = ?`,
+		string(raw), proposalID)
+	return err
 }
 
 // ActionRow is a governance action as stored, for display.
@@ -175,6 +220,86 @@ type ActionRow struct {
 	MetaURL    string
 	BlockTime  int64
 	Expiration sql.NullInt64
+
+	// Status is the action's fate: Live, Ratified, Enacted, Dropped, Expired.
+	// A countdown on an action that was enacted last month is a lie.
+	Status string
+
+	// Description is the on-chain payload — what the action actually does.
+	Description string
+
+	// The proposer's own case for the action (CIP-108), distinct from the
+	// committee's rationale, which Cella authors separately.
+	Motivation        string
+	ProposerRationale string
+
+	Deposit       string // lovelace, as a decimal string
+	ReturnAddress string // where the deposit goes back to; effectively the proposer
+	ProposedEpoch sql.NullInt64
+
+	// MetaHash is what the chain committed to; MetaValid records whether the
+	// document at MetaURL actually hashes to it. Invalid means the abstract a
+	// delegate is reading is not the one the proposer signed for.
+	MetaHash  string
+	MetaValid sql.NullBool
+
+	// VotingSummary is the raw Koios stake-weighted tally, or "".
+	VotingSummary string
+}
+
+// Live reports whether the action is still accepting votes. An empty status
+// means the row predates status tracking, in which case we cannot claim it is
+// settled and treat it as live.
+func (r ActionRow) Live() bool {
+	return r.Status == "" || r.Status == string(koios.StatusLive)
+}
+
+// Settled reports whether the chain has already decided this action's fate.
+func (r ActionRow) Settled() bool { return !r.Live() }
+
+// Payload decodes what the action does. The bool is false when there is nothing
+// decodable — an older row, or an action type Cella has never seen.
+func (r ActionRow) Payload() (govaction.Payload, bool) {
+	if r.Description == "" {
+		return govaction.Payload{}, false
+	}
+	p, err := govaction.Decode(json.RawMessage(r.Description))
+	if err != nil {
+		return govaction.Payload{}, false
+	}
+	return p, true
+}
+
+// Summary decodes the ecosystem's stake-weighted tally, if one was recorded.
+func (r ActionRow) Summary() (koios.VotingSummary, bool) {
+	if r.VotingSummary == "" {
+		return koios.VotingSummary{}, false
+	}
+	var s koios.VotingSummary
+	if err := json.Unmarshal([]byte(r.VotingSummary), &s); err != nil {
+		return koios.VotingSummary{}, false
+	}
+	return s, true
+}
+
+// actionColumns is the SELECT list every action read shares, so a new column
+// cannot be added to one query and forgotten in the other.
+const actionColumns = `
+  proposal_id, tx_hash, idx, type, title, COALESCE(abstract,''), meta_url, block_time, expiration,
+  COALESCE(status,''), COALESCE(description,''), COALESCE(motivation,''),
+  COALESCE(proposer_rationale,''), COALESCE(deposit,''), COALESCE(return_address,''),
+  proposed_epoch, COALESCE(meta_hash,''), meta_is_valid, COALESCE(voting_summary,'')`
+
+// scanAction reads one row of actionColumns.
+func scanAction(sc interface{ Scan(...any) error }) (ActionRow, error) {
+	var r ActionRow
+	err := sc.Scan(
+		&r.ProposalID, &r.TxHash, &r.Idx, &r.Type, &r.Title, &r.Abstract, &r.MetaURL,
+		&r.BlockTime, &r.Expiration,
+		&r.Status, &r.Description, &r.Motivation, &r.ProposerRationale, &r.Deposit,
+		&r.ReturnAddress, &r.ProposedEpoch, &r.MetaHash, &r.MetaValid, &r.VotingSummary,
+	)
+	return r, err
 }
 
 // Slug is a URL-safe identifier for the action's detail page. The bech32/hash
@@ -196,7 +321,7 @@ func (d *DB) Actions(limit int) ([]ActionRow, error) {
 		limit = 100
 	}
 	rows, err := d.sql.Query(`
-SELECT proposal_id, tx_hash, idx, type, title, COALESCE(abstract, ''), meta_url, block_time, expiration
+SELECT`+actionColumns+`
 FROM governance_actions
 ORDER BY block_time DESC
 LIMIT ?`, limit)
@@ -207,8 +332,8 @@ LIMIT ?`, limit)
 
 	var out []ActionRow
 	for rows.Next() {
-		var r ActionRow
-		if err := rows.Scan(&r.ProposalID, &r.TxHash, &r.Idx, &r.Type, &r.Title, &r.Abstract, &r.MetaURL, &r.BlockTime, &r.Expiration); err != nil {
+		r, err := scanAction(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -231,15 +356,16 @@ func (d *DB) ActionBySlug(slug string) (ActionRow, bool, error) {
 	txHash := slug[:i]
 
 	row := d.sql.QueryRow(`
-SELECT proposal_id, tx_hash, idx, type, title, COALESCE(abstract, ''), meta_url, block_time, expiration
+SELECT`+actionColumns+`
 FROM governance_actions
 WHERE tx_hash = ? AND idx = ?`, txHash, idx)
-	err = row.Scan(&r.ProposalID, &r.TxHash, &r.Idx, &r.Type, &r.Title, &r.Abstract, &r.MetaURL, &r.BlockTime, &r.Expiration)
+
+	r, err = scanAction(row)
 	if err == sql.ErrNoRows {
-		return r, false, nil
+		return ActionRow{}, false, nil
 	}
 	if err != nil {
-		return r, false, err
+		return ActionRow{}, false, err
 	}
 	return r, true, nil
 }

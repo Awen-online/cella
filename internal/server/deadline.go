@@ -128,12 +128,14 @@ func (d Deadline) Unix() int64 {
 func byUrgency(a, b actionView) int {
 	rank := func(v actionView) int {
 		switch {
+		case v.Settled():
+			return 3 // the chain has decided: nothing left for the committee to do
 		case v.Deadline.Known && !v.Deadline.Expired:
-			return 0 // live: act on these
+			return 0 // live, with a clock: act on these
 		case !v.Deadline.Known:
-			return 1 // unknowable: still possibly live
+			return 1 // no clock we can resolve, but still open
 		default:
-			return 2 // expired: nothing left to do
+			return 2 // out of time, but the chain has not recorded a fate yet
 		}
 	}
 	if ra, rb := rank(a), rank(b); ra != rb {

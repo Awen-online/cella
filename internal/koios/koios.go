@@ -45,6 +45,94 @@ type GovernanceAction struct {
 	Expiration *int64          `json:"expiration"`
 	MetaURL    string          `json:"meta_url"`
 	MetaJSON   json.RawMessage `json:"meta_json"`
+
+	// Description is what the action actually *does* — the on-chain payload the
+	// ledger will execute. Everything else here is what its authors said about
+	// it; this is the binding part.
+	Description json.RawMessage `json:"proposal_description"`
+
+	// The action's fate. Each is the epoch in which it happened, or nil if it
+	// has not. They are mutually exclusive in practice, and an action with none
+	// of them set is still live. Without these Cella would run a countdown on an
+	// action that was enacted a month ago.
+	RatifiedEpoch *int64 `json:"ratified_epoch"`
+	EnactedEpoch  *int64 `json:"enacted_epoch"`
+	DroppedEpoch  *int64 `json:"dropped_epoch"`
+	ExpiredEpoch  *int64 `json:"expired_epoch"`
+
+	ProposedEpoch *int64 `json:"proposed_epoch"`
+
+	// Deposit is the lovelace the proposer staked, returned to ReturnAddress if
+	// the action is ratified or expires, forfeited on a no-confidence removal.
+	Deposit       json.Number `json:"deposit"`
+	ReturnAddress string      `json:"return_address"`
+
+	// MetaHash is what the chain committed to, and MetaIsValid is whether the
+	// document at MetaURL actually hashes to it. A false here means the anchored
+	// metadata does not match what was signed on-chain — the abstract a delegate
+	// is reading may not be the abstract the proposer committed to.
+	MetaHash    string `json:"meta_hash"`
+	MetaIsValid *bool  `json:"meta_is_valid"`
+}
+
+// Status is an action's position in its lifecycle.
+type Status string
+
+const (
+	StatusLive     Status = "Live"     // still accepting votes
+	StatusRatified Status = "Ratified" // passed, awaiting enactment
+	StatusEnacted  Status = "Enacted"  // in force
+	StatusDropped  Status = "Dropped"  // removed without enacting
+	StatusExpired  Status = "Expired"  // ran out of time
+)
+
+// Status derives the action's fate from the epochs the chain records.
+//
+// Order matters: an action can be both ratified and enacted, and enactment is
+// the later and more final of the two, so it wins.
+func (a GovernanceAction) Status() Status {
+	switch {
+	case a.EnactedEpoch != nil:
+		return StatusEnacted
+	case a.RatifiedEpoch != nil:
+		return StatusRatified
+	case a.DroppedEpoch != nil:
+		return StatusDropped
+	case a.ExpiredEpoch != nil:
+		return StatusExpired
+	default:
+		return StatusLive
+	}
+}
+
+// Motivation is the CIP-108 motivation: why the proposer says the action is
+// needed. Distinct from the abstract, which says what it is.
+func (a GovernanceAction) Motivation() string { return a.metaBodyField("motivation") }
+
+// Rationale is the CIP-108 rationale *the proposer wrote* — their argument for
+// the action. It is not the committee's rationale, which Cella authors itself.
+func (a GovernanceAction) Rationale() string { return a.metaBodyField("rationale") }
+
+// metaBodyField pulls one string field out of the anchored CIP-108 body.
+func (a GovernanceAction) metaBodyField(field string) string {
+	if len(a.MetaJSON) == 0 {
+		return ""
+	}
+	var m struct {
+		Body map[string]json.RawMessage `json:"body"`
+	}
+	if err := json.Unmarshal(a.MetaJSON, &m); err != nil {
+		return ""
+	}
+	raw, ok := m.Body[field]
+	if !ok {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return ""
+	}
+	return s
 }
 
 // Title extracts a human-readable title from the CIP-108 anchored metadata,

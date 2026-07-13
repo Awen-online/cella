@@ -121,8 +121,11 @@ func runIngest(cfg config.Config, args []string) error {
 		return err
 	}
 
-	// For each action, pull its on-chain votes and keep the CC ones.
-	votesTotal := 0
+	// For each action, pull its on-chain votes and keep the CC ones, plus the
+	// stake-weighted tally across every voter role. A committee weighing
+	// constitutionality should know how the DReps and SPOs are voting — not to
+	// follow them, but to know what it is agreeing or disagreeing with.
+	votesTotal, summaries := 0, 0
 	for _, a := range actions {
 		votes, err := kc.ProposalVotes(ctx, a.ProposalID)
 		if err != nil {
@@ -134,9 +137,22 @@ func runIngest(cfg config.Config, args []string) error {
 			return err
 		}
 		votesTotal += nv
+
+		sum, ok, err := kc.ProposalVotingSummary(ctx, a.ProposalID)
+		if err != nil {
+			log.Printf("  warn: voting summary for %s: %v", a.ProposalID, err)
+			continue
+		}
+		if ok {
+			if err := db.SaveVotingSummary(a.ProposalID, sum); err != nil {
+				return err
+			}
+			summaries++
+		}
 	}
 
-	log.Printf("ingested %d governance actions (%d written) and %d CC votes into %s", len(actions), na, votesTotal, cfg.DBPath)
+	log.Printf("ingested %d governance actions (%d written), %d CC votes and %d voting summaries into %s",
+		len(actions), na, votesTotal, summaries, cfg.DBPath)
 	return nil
 }
 

@@ -5,11 +5,15 @@ package server
 
 import (
 	"html/template"
+	"math/big"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Awen-online/cella/internal/govaction"
+	"github.com/Awen-online/cella/internal/koios"
 	"github.com/Awen-online/cella/internal/store"
 )
 
@@ -57,7 +61,10 @@ func New(db *store.DB, opts Options) *Server {
 		body: body,
 		mux:  http.NewServeMux(),
 		tpl:  template.Must(template.New("index").Funcs(funcs).Parse(withFonts(indexHTML))),
-		dtpl: template.Must(template.New("detail").Funcs(funcs).Parse(withFonts(detailHTML))),
+		dtpl: template.Must(template.Must(template.Must(
+			template.New("detail").Funcs(funcs).Parse(withFonts(detailHTML))).
+			Parse(payloadHTML)).
+			Parse(votingContextHTML)),
 		ctpl: template.Must(template.New("constitution").Parse(withFonts(constHTML))),
 		etpl: template.Must(template.New("enter").Parse(withFonts(enterHTML))),
 		stpl: template.Must(template.New("submit").Parse(withFonts(submitHTML))),
@@ -115,8 +122,25 @@ type actionView struct {
 	// HasRationale is true once the committee's rationale has been authored.
 	HasRationale bool
 
-	// Deadline is when voting closes on this action.
+	// Deadline is when voting closes on this action. Zero when the action is
+	// already settled — there is nothing left to count down to.
 	Deadline Deadline
+
+	// Payload is what the action actually does on-chain: the recipients of a
+	// treasury withdrawal, the parameters a change would set, the version a hard
+	// fork targets. Everything else about an action is what its authors said
+	// about it; this is the binding part.
+	Payload    govaction.Payload
+	HasPayload bool
+
+	// Summary is how the rest of the ecosystem is voting — stake-weighted DRep
+	// and SPO tallies. Context for the committee's own decision, not a mandate.
+	Summary    koios.VotingSummary
+	HasSummary bool
+
+	// The proposer's own case (CIP-108), as opposed to the committee's.
+	MotivationHTML        template.HTML
+	ProposerRationaleHTML template.HTML
 
 	// Full Constitutional Committee roster for this action (all seats; a seat
 	// with Voted=false is shown grayed as awaiting a vote).
@@ -219,7 +243,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			av.YourVote = mv.Vote
 		}
 		av.Tally, _ = tallyFrom(chamberVotes[a.ProposalID], s.body)
-		if a.Expiration.Valid {
+
+		// The clock only means something while the action is still open. Running
+		// a countdown on one the chain enacted last month is a lie, and running
+		// one on an action already ratified invites a committee to vote on
+		// something that is no longer theirs to decide.
+		if a.Expiration.Valid && a.Live() {
 			av.Deadline = deadlineFor(a.Expiration.Int64, net, now)
 		}
 		views = append(views, av)
@@ -326,9 +355,16 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if a.Expiration.Valid {
+	if a.Expiration.Valid && a.Live() {
 		av.Deadline = deadlineFor(a.Expiration.Int64, net, time.Now())
 	}
+
+	// What the action actually does, and how the rest of the ecosystem is
+	// voting on it.
+	av.Payload, av.HasPayload = a.Payload()
+	av.Summary, av.HasSummary = a.Summary()
+	av.MotivationHTML = mdHTML(a.Motivation)
+	av.ProposerRationaleHTML = mdHTML(a.ProposerRationale)
 
 	// Full committee roster: every seat, voted or awaiting.
 	byCred := make(map[string]store.VoteRow, len(av.Votes))
@@ -370,6 +406,33 @@ var funcs = template.FuncMap{
 		return s[:8] + "…" + s[len(s)-6:]
 	},
 	"ccname": ccMemberName,
+
+	// ada renders lovelace exactly. A treasury figure that has been through a
+	// float is a treasury figure that may be wrong.
+	"ada": govaction.ADA,
+
+	// pct/pctf give a recipient's share of a withdrawal, for the bar and the label.
+	"pctf": func(part, total *big.Int) float64 {
+		return govaction.Recipient{Lovelace: part}.Percent(total)
+	},
+	"pct": func(part, total *big.Int) string {
+		p := govaction.Recipient{Lovelace: part}.Percent(total)
+		// Keep a hairline visible for a recipient too small to see, so nobody is
+		// invisible in the layout.
+		if p > 0 && p < 0.4 {
+			p = 0.4
+		}
+		return strconv.FormatFloat(p, 'f', 2, 64)
+	},
+
+	// depositADA renders the proposer's staked deposit.
+	"depositADA": func(lovelace string) string {
+		n, ok := new(big.Int).SetString(lovelace, 10)
+		if !ok {
+			return ""
+		}
+		return govaction.ADA(n)
+	},
 }
 
 // indexHTML is Cella-branded (forum navy + gold leaf + Cardano blue).
@@ -411,6 +474,10 @@ const indexHTML = `<!doctype html>
   .cd.expired { color:var(--muted); text-decoration:line-through; }
   .cd.unknown { color:var(--muted); font-weight:400; }
   .dlwhen { color:var(--muted); font-size:11.5px; margin-top:3px; }
+  .stpill { display:inline-block; font-family:'Cinzel',serif; font-size:10px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; padding:2px 10px; border-radius:999px; border:1px solid; }
+  .stpill.Enacted { color:var(--green); border-color:rgba(75,189,136,.5); }
+  .stpill.Ratified { color:var(--goldb); border-color:rgba(245,210,122,.5); }
+  .stpill.Dropped, .stpill.Expired { color:var(--muted); border-color:rgba(139,147,184,.4); }
   td.quorum { white-space:nowrap; }
   .qn { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:14px; color:var(--muted); }
   .qn.part { color:var(--goldb); }
@@ -466,7 +533,10 @@ const indexHTML = `<!doctype html>
       {{range .Actions}}
       <tr>
         <td class="dl">
-          {{if .Deadline.Epoch}}
+          {{if .Settled}}
+            <div class="stpill {{.Status}}">{{.Status}}</div>
+            <div class="dlwhen">decided on-chain</div>
+          {{else if .Deadline.Epoch}}
             <div class="cd {{.Deadline.Urgency}}" {{if .Deadline.Unix}}data-deadline="{{.Deadline.Unix}}"{{end}}>{{if .Deadline.Countdown}}{{.Deadline.Countdown}}{{else}}epoch {{.Deadline.Epoch}}{{end}}</div>
             <div class="dlwhen">{{.Deadline.When}}</div>
           {{else}}
@@ -585,6 +655,68 @@ const detailHTML = `<!doctype html>
   .deadline.expired .cd { color:var(--muted); }
   .deadline.unknown { border-color:rgba(139,147,184,.3); }
   .deadline.unknown .cd { color:var(--muted); font-weight:400; }
+
+  /* Lifecycle: the chain has already decided. */
+  .settled { margin-top:12px; padding:10px 14px; border-radius:10px; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; border:1px solid rgba(139,147,184,.35); background:rgba(139,147,184,.07); }
+  .settled .st-badge { font-family:'Cinzel',serif; font-size:12px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; padding:3px 12px; border-radius:999px; border:1px solid; }
+  .settled .st-note { color:var(--muted); font-size:13.5px; }
+  .settled.Enacted { border-color:rgba(75,189,136,.45); background:rgba(75,189,136,.07); }
+  .settled.Enacted .st-badge { color:var(--green); border-color:rgba(75,189,136,.5); }
+  .settled.Ratified .st-badge { color:var(--goldb); border-color:rgba(245,210,122,.5); }
+  .settled.Dropped .st-badge, .settled.Expired .st-badge { color:var(--muted); border-color:rgba(139,147,184,.4); }
+
+  /* The anchored metadata does not match what was signed on-chain. */
+  .anchorbad { margin-top:12px; padding:11px 14px; border-radius:10px; border:1px solid rgba(217,105,95,.5); background:rgba(217,105,95,.08); color:#e8a49c; font-size:13.5px; line-height:1.55; }
+  .anchorbad b { color:#f0b8b1; }
+
+  /* On-chain payload. */
+  .pl-head { font-size:16px; color:var(--body); margin-bottom:12px; }
+  .pl-total { color:var(--goldb); font-size:19px; font-family:'Cinzel',serif; letter-spacing:.02em; }
+  .pl-sub { font-family:'Cinzel',serif; color:var(--gold); font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin:14px 0 7px; }
+  .pl-rows { display:flex; flex-direction:column; gap:9px; }
+  .pl-row { display:grid; grid-template-columns:130px 1fr 54px; gap:10px; align-items:center; }
+  .pl-amt { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:13px; color:var(--goldb); text-align:right; }
+  .pl-barwrap { height:9px; background:rgba(139,147,184,.14); border-radius:999px; overflow:hidden; }
+  .pl-bar { height:100%; background:linear-gradient(90deg,var(--gold),var(--goldb)); border-radius:999px; }
+  .pl-pct { font-size:12px; color:var(--muted); text-align:right; }
+  .pl-cred { grid-column:1 / -1; font-size:11.5px; color:var(--muted); word-break:break-all; margin-top:-3px; }
+  .pl-cred code { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11px; color:var(--body); }
+  .pl-net { font-family:'Cinzel',serif; font-size:9.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); border:1px solid rgba(139,147,184,.3); border-radius:999px; padding:1px 7px; margin-right:6px; }
+  .pl-script { color:var(--goldb); font-size:10px; }
+  .pl-seat { font-size:12px; color:var(--body); word-break:break-all; }
+  .pl-seat code { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11px; color:var(--goldb); }
+  .pl-seat.pl-removed code { color:var(--red); text-decoration:line-through; }
+  .pl-params { width:100%; border-collapse:collapse; margin-top:4px; }
+  .pl-params th { text-align:left; font-family:'Cinzel',serif; color:var(--gold); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; padding:6px 10px; border-bottom:1px solid rgba(201,137,42,.2); }
+  .pl-params td { padding:8px 10px; border-bottom:1px solid rgba(201,137,42,.1); font-size:13.5px; vertical-align:top; }
+  .pl-params code { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:12px; color:var(--body); }
+  .pl-val { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:12.5px; color:var(--goldb); word-break:break-all; }
+  .pl-kv { font-size:13.5px; color:var(--muted); margin:6px 0; word-break:break-all; }
+  .pl-kv span { font-family:'Cinzel',serif; font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--gold); margin-right:8px; }
+  .pl-kv code { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11.5px; color:var(--body); }
+  .pl-note { color:var(--muted); font-size:13px; line-height:1.55; margin-top:12px; font-style:italic; }
+  .pl-note a { color:var(--blue); }
+  .pl-foot { color:var(--muted); font-size:11.5px; margin-top:12px; word-break:break-all; }
+  .pl-foot code { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; color:var(--body); }
+  .pl-raw { font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11.5px; color:var(--body); background:var(--forum); border-radius:8px; padding:12px; overflow-x:auto; margin-top:10px; }
+
+  /* How the rest of the chain is voting. */
+  .vc-note { color:var(--muted); font-size:13.5px; line-height:1.55; margin-bottom:16px; }
+  .vc-role { margin-bottom:18px; }
+  .vc-name { font-family:'Cinzel',serif; color:var(--ivory); font-size:13px; letter-spacing:.03em; margin-bottom:7px; }
+  .vc-n { color:var(--muted); font-family:'EB Garamond',serif; font-size:12.5px; letter-spacing:0; margin-left:8px; }
+  .vc-bar { display:flex; height:11px; border-radius:999px; overflow:hidden; background:rgba(139,147,184,.14); }
+  .vc-seg.y { background:var(--green); } .vc-seg.n { background:var(--red); }
+  .vc-legend { margin-top:7px; font-size:13px; color:var(--muted); }
+  .vc-legend .y { color:var(--green); } .vc-legend .n { color:var(--red); } .vc-legend .a { color:var(--muted); }
+  .vc-cast { margin-left:8px; font-size:12px; }
+  .vc-foot { color:var(--muted); font-size:12px; font-style:italic; border-top:1px solid rgba(201,137,42,.12); padding-top:11px; }
+
+  /* The proposer's own case. */
+  .pcase-note { color:var(--muted); font-size:13px; font-style:italic; margin-bottom:12px; }
+  .pcase { margin:8px 0; }
+  .pcase summary { cursor:pointer; font-family:'Cinzel',serif; color:var(--goldb); font-size:12px; letter-spacing:.05em; padding:6px 0; }
+  .pcase summary:hover { color:var(--gold); }
   .meta a { color:var(--blue); text-decoration:none; }
   .card { background:var(--veil); border:1px solid rgba(201,137,42,.18); border-radius:12px; padding:18px 20px; margin-top:20px; }
   .card h2 { font-family:'Cinzel',serif; color:var(--gold); font-size:13px; letter-spacing:.12em; text-transform:uppercase; margin:0 0 10px; }
@@ -656,19 +788,39 @@ const detailHTML = `<!doctype html>
 <main>
   <div class="type">{{.Type}}</div>
   <h1>{{if .Title}}{{.Title}}{{else}}<span class="muted">(no anchored title)</span>{{end}}</h1>
-  {{if .Deadline.Epoch}}
+  {{if .Settled}}
+  <div class="settled {{.Status}}">
+    <span class="st-badge">{{.Status}}</span>
+    <span class="st-note">
+      {{if eq .Status "Enacted"}}This action is in force. The chain has already executed it.
+      {{else if eq .Status "Ratified"}}This action passed and is awaiting enactment. It is no longer the committee's to decide.
+      {{else if eq .Status "Dropped"}}This action was removed without being enacted.
+      {{else}}This action expired without reaching a decision.{{end}}
+    </span>
+  </div>
+  {{else if .Deadline.Epoch}}
   <div class="deadline {{.Deadline.Urgency}}">
     <span class="cd">{{if .Deadline.Countdown}}{{.Deadline.Countdown}}{{else}}expires epoch {{.Deadline.Epoch}}{{end}}</span>
     <span class="dlwhen">{{.Deadline.When}}</span>
     {{if and (not .Deadline.Expired) .Deadline.Known}}<span class="dlnote">An action that expires unvoted is an abstention the committee never chose.</span>{{end}}
   </div>
   {{end}}
+
+  {{if and .MetaValid.Valid (not .MetaValid.Bool)}}
+  <div class="anchorbad">
+    <b>The anchored metadata does not match the chain.</b> The document at the anchor does not hash to what the proposer committed to on-chain, so the title, abstract and motivation below may not be what was actually proposed. Read the payload, not the prose.
+  </div>
+  {{end}}
+
   <div class="meta">
-    Seen {{date .BlockTime}}<br>
+    Seen {{date .BlockTime}}{{if .ProposedEpoch.Valid}} · proposed epoch {{.ProposedEpoch.Int64}}{{end}}{{if .Deposit}} · deposit &#8371;{{depositADA .Deposit}}{{end}}<br>
     <code>{{.ProposalID}}</code>
+    {{if .ReturnAddress}}<br>Proposer (deposit returns to) <code>{{.ReturnAddress}}</code>{{end}}
     <br><a href="https://adastat.net/governances/{{.GovID}}" target="_blank" rel="noopener">View on AdaStat &#8599;</a>
     {{if .MetaURL}}&nbsp;·&nbsp;<a href="{{.MetaURL}}" rel="noopener">Anchor metadata &#8599;</a>{{end}}
   </div>
+
+  {{template "payload" .}}
 
   {{if .HasReview}}
   <div class="card">
@@ -685,6 +837,27 @@ const detailHTML = `<!doctype html>
     <div class="abstract">{{.AbstractHTML}}</div>
   </div>
   {{end}}
+
+  {{if or .Motivation .ProposerRationale}}
+  <div class="card">
+    <h2>The proposer's case</h2>
+    <div class="pcase-note">Written by the proposer, not by the committee. Read it as an argument, not as a finding.</div>
+    {{if .Motivation}}
+    <details class="pcase" open>
+      <summary>Motivation &mdash; why they say it is needed</summary>
+      <div class="abstract">{{.MotivationHTML}}</div>
+    </details>
+    {{end}}
+    {{if .ProposerRationale}}
+    <details class="pcase">
+      <summary>Their rationale</summary>
+      <div class="abstract">{{.ProposerRationaleHTML}}</div>
+    </details>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{template "votingcontext" .}}
 
   <div class="card">
     <h2>Chamber deliberation — {{.BodyName}}</h2>
