@@ -140,15 +140,8 @@ func (s *Server) handleMemberLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	name := r.FormValue("member")
-	var found *Member
-	for i := range demoBody.Members {
-		if demoBody.Members[i].Name == name {
-			found = &demoBody.Members[i]
-			break
-		}
-	}
-	if found == nil {
+	found, ok := s.body.ByName(r.FormValue("member"))
+	if !ok {
 		http.Redirect(w, r, "/enter", http.StatusFound)
 		return
 	}

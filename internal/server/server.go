@@ -22,6 +22,10 @@ type Options struct {
 	// any delegate with no proof of identity. Never enable it on a reachable
 	// deployment.
 	Demo bool
+
+	// Body is the delegate roster. The zero value falls back to the placeholder
+	// roster, whose addresses cannot authenticate anyone.
+	Body Body
 }
 
 // Server is Cella's HTTP server.
@@ -29,6 +33,7 @@ type Server struct {
 	db   *store.DB
 	key  []byte // signs session cookies and CSRF tokens
 	demo bool   // the roster picker is available (never in production)
+	body Body   // the delegate roster
 	mux  *http.ServeMux
 	tpl  *template.Template
 	dtpl *template.Template
@@ -40,10 +45,15 @@ type Server struct {
 
 // New builds a Server backed by db.
 func New(db *store.DB, opts Options) *Server {
+	body := opts.Body
+	if len(body.Members) == 0 {
+		body = demoBody
+	}
 	s := &Server{
 		db:   db,
 		key:  newKey(opts.Secret),
 		demo: opts.Demo,
+		body: body,
 		mux:  http.NewServeMux(),
 		tpl:  template.Must(template.New("index").Funcs(funcs).Parse(withFonts(indexHTML))),
 		dtpl: template.Must(template.New("detail").Funcs(funcs).Parse(withFonts(detailHTML))),
@@ -199,7 +209,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		if mv, ok := myVotes[a.ProposalID]; ok {
 			av.YourVote = mv.Vote
 		}
-		av.Tally, _ = tallyFrom(chamberVotes[a.ProposalID])
+		av.Tally, _ = tallyFrom(chamberVotes[a.ProposalID], s.body)
 		if a.Expiration.Valid {
 			av.Deadline = deadlineFor(a.Expiration.Int64, net, now)
 		}
@@ -261,7 +271,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	// The chamber: every delegate's recorded position, and where that leaves the
 	// body. Nothing here is inferred — a delegate who has not voted shows as
 	// awaiting.
-	av.BodyName = demoBody.Name
+	av.BodyName = s.body.Name
 	av.Deliberation, err = s.chamber(a.ProposalID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

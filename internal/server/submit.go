@@ -58,7 +58,7 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		ActionRow: a,
 		Decision:  t.Decision(),
 		Tally:     t,
-		Members:   demoBody.Members,
+		Members:   s.body.Members,
 	}
 
 	// A committee submits its reasoning with its vote. Without an anchorable

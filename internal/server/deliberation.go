@@ -27,8 +27,8 @@ func (s *Server) chamber(proposalID string) ([]MemberStance, error) {
 		return nil, err
 	}
 
-	out := make([]MemberStance, 0, len(demoBody.Members))
-	for _, m := range demoBody.Members {
+	out := make([]MemberStance, 0, len(s.body.Members))
+	for _, m := range s.body.Members {
 		st := MemberStance{Member: m}
 		if v, ok := votes[m.Name]; ok && v.Vote != "" {
 			st.Vote, st.Rationale, st.Recorded = v.Vote, v.Rationale, true

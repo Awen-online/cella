@@ -66,6 +66,7 @@ configuration (environment):
   CELLA_ADDR       web server listen address     (default :8080)
   CELLA_SECRET     signs session cookies         (default: random key per start)
   CELLA_DEMO       enable roster sign-in — NO AUTH; never on a reachable instance
+  CELLA_ROSTER     path to the delegate roster JSON (default: placeholder roster)
   KOIOS_URL        Koios API base URL            (default https://api.koios.rest/api/v1)
   KOIOS_TOKEN      optional Koios bearer token
   CELLA_LLM_URL    OpenAI-compatible endpoint    (e.g. http://localhost:11434/v1 for Ollama)
@@ -140,6 +141,16 @@ func runServe(cfg config.Config, args []string) error {
 	}
 	defer db.Close()
 
+	body, err := server.LoadBody(cfg.RosterPath)
+	if err != nil {
+		return err
+	}
+	if cfg.RosterPath == "" {
+		log.Printf("warning: CELLA_ROSTER is not set — using the placeholder roster; no wallet can sign in")
+	} else {
+		log.Printf("roster: %s (%d delegates)", body.Name, len(body.Members))
+	}
+
 	if cfg.Secret == "" {
 		log.Printf("warning: CELLA_SECRET is not set — using a random session key; sessions will not survive a restart")
 	}
@@ -150,7 +161,11 @@ func runServe(cfg config.Config, args []string) error {
 	}
 
 	log.Printf("cella %s serving on http://localhost%s", version, *addr)
-	return server.New(db, server.Options{Secret: cfg.Secret, Demo: cfg.Demo}).ListenAndServe(*addr)
+	return server.New(db, server.Options{
+		Secret: cfg.Secret,
+		Demo:   cfg.Demo,
+		Body:   body,
+	}).ListenAndServe(*addr)
 }
 
 func runReview(cfg config.Config, args []string) error {

@@ -53,10 +53,10 @@ func (t tally) Seats() int { return t.Recorded() + t.DidNotVote }
 // tallyFrom counts the body's recorded positions from an already-fetched vote
 // map. Roster members who have not recorded one are counted as didNotVote — the
 // CIP distinguishes abstaining (a deliberate position) from simply not voting.
-func tallyFrom(votes map[string]store.MemberVote) (tally, []string) {
+func tallyFrom(votes map[string]store.MemberVote, body Body) (tally, []string) {
 	var t tally
 	var authors []string
-	for _, m := range demoBody.Members {
+	for _, m := range body.Members {
 		v, ok := votes[m.Name]
 		if !ok || v.Vote == "" {
 			t.DidNotVote++
@@ -82,7 +82,7 @@ func (s *Server) tallyFor(proposalID string) (tally, []string, error) {
 	if err != nil {
 		return tally{}, nil, err
 	}
-	t, authors := tallyFrom(votes)
+	t, authors := tallyFrom(votes, s.body)
 	return t, authors, nil
 }
 

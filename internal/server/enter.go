@@ -18,7 +18,7 @@ func (s *Server) handleEnter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.etpl.Execute(w, enterView{Body: demoBody, Demo: s.demo}); err != nil {
+	if err := s.etpl.Execute(w, enterView{Body: s.body, Demo: s.demo}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }

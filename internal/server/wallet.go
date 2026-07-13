@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Awen-online/cella/internal/cardano"
 	"github.com/fxamacker/cbor/v2"
 	"golang.org/x/crypto/blake2b"
 )
@@ -85,21 +86,34 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, ok, err := verifyCOSESign1(req.Signature, req.Key)
+	payload, pub, ok, err := verifyCOSESign1(req.Signature, req.Key)
 	if err != nil || !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "signature did not verify"})
 		return
 	}
 
 	// The signed payload must be a live challenge — hashed or raw, depending on
-	// the wallet.
+	// the wallet. Consuming it here is what stops a captured signature being
+	// replayed.
 	if !challengeMatches(payload) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "challenge expired or unknown"})
 		return
 	}
 
-	// Authenticated. For the demo this wallet is Cullah (a Cardano Curia delegate).
-	s.setMember(w, "Cullah")
+	// Who signed? Not who they *say* they are — req.Address is attacker-
+	// controlled and is deliberately ignored. The public key is inside the
+	// signature we just verified, so hashing it yields a credential the signer
+	// has actually proved they hold. That credential must belong to a delegate
+	// on the roster.
+	member, ok := s.body.ByCredential(hex.EncodeToString(cardano.KeyHash(pub)))
+	if !ok {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "this wallet is not on the delegate roster",
+		})
+		return
+	}
+
+	s.setMember(w, member.Name)
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "redirect": "/"})
 }
 
@@ -135,16 +149,18 @@ func challengeMatches(payload []byte) bool {
 	return hit != ""
 }
 
-// verifyCOSESign1 verifies a CIP-8 COSE_Sign1 against the COSE_Key public key,
-// returning the signed payload on success.
-func verifyCOSESign1(sigHex, keyHex string) ([]byte, bool, error) {
+// verifyCOSESign1 verifies a CIP-8 COSE_Sign1 against the COSE_Key public key.
+// On success it returns both the signed payload and the public key that signed
+// it — the key is what identifies the signer, so callers must take it from here
+// rather than from anything the client asserted separately.
+func verifyCOSESign1(sigHex, keyHex string) (payload, pub []byte, ok bool, err error) {
 	sigBytes, err := hex.DecodeString(sigHex)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	keyBytes, err := hex.DecodeString(keyHex)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
 	// Strip a COSE_Sign1 tag (18 = 0xd2) if present.
@@ -160,26 +176,26 @@ func verifyCOSESign1(sigHex, keyHex string) ([]byte, bool, error) {
 		Signature   []byte
 	}
 	if err := cbor.Unmarshal(sigBytes, &sign1); err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
-	pub, err := coseKeyPub(keyBytes)
+	pub, err = coseKeyPub(keyBytes)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	if len(pub) != ed25519.PublicKeySize {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
 
 	// Sig_structure = [ "Signature1", protected, external_aad(empty), payload ]
 	sigStruct, err := cbor.Marshal([]interface{}{"Signature1", sign1.Protected, []byte{}, sign1.Payload})
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	if !ed25519.Verify(ed25519.PublicKey(pub), sigStruct, sign1.Signature) {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
-	return sign1.Payload, true, nil
+	return sign1.Payload, pub, true, nil
 }
 
 // coseKeyPub extracts the Ed25519 public key (COSE_Key label -2) from a COSE_Key.

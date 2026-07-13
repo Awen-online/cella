@@ -26,6 +26,12 @@ type Config struct {
 	// committee's rationale.
 	Demo bool
 
+	// RosterPath points at a JSON file describing the body's delegates: their
+	// names, roles, wallet addresses (how Cella recognises them at sign-in) and
+	// on-chain voting key hashes. Without it Cella uses a placeholder roster,
+	// whose addresses are not real and so can authenticate nobody.
+	RosterPath string
+
 	// Constitutionality review — bring your own model. Any OpenAI-compatible
 	// endpoint (OpenAI, OpenRouter, Groq, vLLM, LM Studio, local Ollama).
 	LLMURL   string // e.g. https://api.openai.com/v1 or http://localhost:11434/v1
@@ -42,6 +48,7 @@ func Load() Config {
 		KoiosToken: os.Getenv("KOIOS_TOKEN"),
 		Secret:     os.Getenv("CELLA_SECRET"),
 		Demo:       truthy(os.Getenv("CELLA_DEMO")),
+		RosterPath: os.Getenv("CELLA_ROSTER"),
 		LLMURL:     os.Getenv("CELLA_LLM_URL"),
 		LLMModel:   os.Getenv("CELLA_LLM_MODEL"),
 		LLMKey:     os.Getenv("CELLA_LLM_KEY"),
